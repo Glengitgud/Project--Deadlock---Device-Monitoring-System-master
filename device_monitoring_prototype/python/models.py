@@ -56,6 +56,10 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     display_name = db.Column(db.String(120))
     status = db.Column(db.String(16), nullable=False, server_default="active")
+    failed_login_attempts = db.Column(db.Integer, nullable=False, server_default="0", default=0)
+    locked_until = db.Column(db.DateTime(timezone=True), nullable=True)
+    totp_secret = db.Column(db.String(64), nullable=True)
+    mfa_enabled = db.Column(db.Boolean, nullable=False, server_default=db.false(), default=False)
     created_at = db.Column(
         db.DateTime(timezone=True), nullable=False, server_default=func.current_timestamp()
     )
@@ -147,6 +151,7 @@ class Device(db.Model):
     model = db.Column(db.String(120))
     operating_system = db.Column(db.String(120))
     operating_system_version = db.Column(db.String(120))
+    api_token = db.Column(db.String(64), unique=True, nullable=True)
     status = db.Column(db.String(16), nullable=False, server_default="unknown")
     owner_user_id = db.Column(
         ID_TYPE, db.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
@@ -437,3 +442,31 @@ class ActivityLog(db.Model):
     )
 
     actor = db.relationship("User", back_populates="activity_logs")
+
+
+class Alert(db.Model):
+    __tablename__ = "alerts"
+    __table_args__ = (
+        CheckConstraint(
+            "severity IN ('info', 'warning', 'critical')",
+            name="ck_alerts_severity",
+        ),
+        db.Index("ix_alerts_device_time", "device_id", "created_at"),
+    )
+
+    id = db.Column(ID_TYPE, primary_key=True)
+    device_id = db.Column(
+        ID_TYPE,
+        db.ForeignKey("devices.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    severity = db.Column(db.String(16), nullable=False, server_default="warning")
+    title = db.Column(db.String(120), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    is_read = db.Column(db.Boolean, nullable=False, server_default=db.false(), default=False)
+    created_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, server_default=func.current_timestamp()
+    )
+
+    device = db.relationship("Device", backref=db.backref("alerts", cascade="all, delete-orphan", passive_deletes=True))
+

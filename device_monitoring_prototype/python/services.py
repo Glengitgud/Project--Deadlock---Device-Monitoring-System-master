@@ -56,10 +56,16 @@ def _role(name):
     return role
 
 
-def _log(event_type, entity_type=None, entity_id=None, details=None):
+def log_activity(event_type, entity_type=None, entity_id=None, details=None, actor_id=None):
     from flask_login import current_user
 
-    actor_id = current_user.id if current_user.is_authenticated else None
+    if actor_id is None:
+        try:
+            if current_user and current_user.is_authenticated:
+                actor_id = current_user.id
+        except Exception:
+            actor_id = None
+
     db.session.add(
         ActivityLog(
             actor_user_id=actor_id,
@@ -69,6 +75,10 @@ def _log(event_type, entity_type=None, entity_id=None, details=None):
             details=details,
         )
     )
+
+
+def _log(*args, **kwargs):
+    return log_activity(*args, **kwargs)
 
 
 def create_user(data, *, role_name="User"):
@@ -140,6 +150,9 @@ def update_user(user, data):
             if active_admins <= 1:
                 raise ValidationError("The final administrator cannot be deactivated.")
         user.status = status
+        if status == "active":
+            user.failed_login_attempts = 0
+            user.locked_until = None
     _log("user.updated", "user", user.id)
     try:
         db.session.commit()

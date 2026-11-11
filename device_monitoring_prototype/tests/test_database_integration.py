@@ -200,6 +200,77 @@ class DatabaseIntegrationTest(unittest.TestCase):
         self.assertEqual(denied.status_code, 400)
         self.assertEqual(self.client.get("/api/users").status_code, 200)
 
+    def test_account_lockout_after_five_failed_attempts(self):
+        token = self.register_and_login()
+        # Logout
+        self.client.post("/logout", data={"csrf_token": token})
+
+        # Submit 5 incorrect passwords
+        self.client.get("/login")
+        with self.client.session_transaction() as session:
+            login_token = session["_csrf_token"]
+
+        for i in range(5):
+            res = self.client.post(
+                "/login",
+                data={
+                    "csrf_token": login_token,
+                    "username": "testuser",
+                    "password": "wrong-password",
+                },
+            )
+            self.assertEqual(res.status_code, 401)
+
+        with self.app.app_context():
+            user = User.query.filter_by(username="testuser").one()
+            self.assertEqual(user.status, "locked")
+            self.assertEqual(user.failed_login_attempts, 5)
+
+        # Even with correct password, locked user is denied
+        res = self.client.post(
+            "/login",
+            data={
+                "csrf_token": login_token,
+                "username": "testuser",
+                "password": "correct-horse-battery-staple",
+            },
+        )
+        self.assertEqual(res.status_code, 401)
+        self.assertIn("Account is locked", res.get_data(as_text=True))
+
+    def test_password_recovery_and_reset_flow(self):
+        token = self.register_and_login()
+        # Logout first so user is unauthenticated
+        self.client.post("/logout", data={"csrf_token": token})
+
+        self.client.get("/forgot-password")
+        with self.client.session_transaction() as session:
+            csrf = session["_csrf_token"]
+
+        from device_monitoring_prototype.python.security import generate_reset_token
+
+        reset_token = generate_reset_token("test@example.com", "integration-test-secret")
+        reset_res = self.client.post(
+            f"/reset-password/{reset_token}",
+            data={
+                "csrf_token": csrf,
+                "new_password": "brand-new-super-secure-password-123",
+                "confirm_password": "brand-new-super-secure-password-123",
+            },
+        )
+        self.assertEqual(reset_res.status_code, 302)
+
+        # Login with new password
+        login_res = self.client.post(
+            "/login",
+            data={
+                "csrf_token": csrf,
+                "username": "testuser",
+                "password": "brand-new-super-secure-password-123",
+            },
+        )
+        self.assertEqual(login_res.status_code, 302)
+
 
 if __name__ == "__main__":
     unittest.main()
