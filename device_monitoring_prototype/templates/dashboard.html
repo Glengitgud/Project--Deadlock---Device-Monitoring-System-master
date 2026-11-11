@@ -4,12 +4,6 @@
 {% block page_title %}Dashboard{% endblock %}
 
 {% block content %}
-<!-- ======================================================
-     DASHBOARD PAGE
-     Shows summary cards, device overview table,
-     and simulated resource monitoring.
-     ====================================================== -->
-
 <!-- ---- Summary Cards Row ---- -->
 <div class="row g-3 mb-4">
     <!-- Total Devices -->
@@ -60,8 +54,7 @@
             <div class="summary-card-body">
                 <div>
                     <h6 class="summary-card-label">Latest Update</h6>
-                    <h3 class="summary-card-value" id="lastUpdate"
-                        style="font-size: 1.1rem;">--</h3>
+                    <h3 class="summary-card-value" id="lastUpdate" style="font-size: 1.1rem;">--</h3>
                 </div>
                 <div class="summary-card-icon bg-info-subtle text-info">
                     <i class="bi bi-clock-history"></i>
@@ -71,10 +64,88 @@
     </div>
 </div>
 
+<!-- ---- Live Resource Monitoring Gauges ---- -->
+<div class="row g-3 mb-4">
+    <!-- CPU Gauge -->
+    <div class="col-md-4">
+        <div class="content-card h-100">
+            <div class="content-card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="fw-semibold"><i class="bi bi-cpu me-2 text-primary"></i>Fleet CPU Load</span>
+                    <span class="badge" id="cpuBadge">0%</span>
+                </div>
+                <div class="progress mb-2" style="height: 10px;">
+                    <div id="cpuProgressBar" class="progress-bar bg-success" role="progressbar" style="width: 0%"></div>
+                </div>
+                <div class="d-flex justify-content-between">
+                    <small class="text-muted">Threshold: &lt;80% Nominal</small>
+                    <small class="fw-bold" id="cpuValueText">0.0%</small>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- RAM Gauge -->
+    <div class="col-md-4">
+        <div class="content-card h-100">
+            <div class="content-card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="fw-semibold"><i class="bi bi-memory me-2 text-info"></i>Fleet RAM Allocation</span>
+                    <span class="badge" id="ramBadge">0%</span>
+                </div>
+                <div class="progress mb-2" style="height: 10px;">
+                    <div id="ramProgressBar" class="progress-bar bg-info" role="progressbar" style="width: 0%"></div>
+                </div>
+                <div class="d-flex justify-content-between">
+                    <small class="text-muted">Threshold: &lt;85% Nominal</small>
+                    <small class="fw-bold" id="ramValueText">0.0%</small>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Storage Gauge -->
+    <div class="col-md-4">
+        <div class="content-card h-100">
+            <div class="content-card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="fw-semibold"><i class="bi bi-hdd-network me-2 text-warning"></i>Fleet Storage Used</span>
+                    <span class="badge" id="storageBadge">0%</span>
+                </div>
+                <div class="progress mb-2" style="height: 10px;">
+                    <div id="storageProgressBar" class="progress-bar bg-warning" role="progressbar" style="width: 0%"></div>
+                </div>
+                <div class="d-flex justify-content-between">
+                    <small class="text-muted">Threshold: &lt;90% Nominal</small>
+                    <small class="fw-bold" id="storageValueText">0.0%</small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ---- Historical Telemetry Trends Chart ---- -->
+<div class="content-card mb-4">
+    <div class="content-card-header d-flex justify-content-between align-items-center">
+        <h6 class="mb-0"><i class="bi bi-graph-up me-2"></i>Fleet Resource Utilization Trends</h6>
+        <span class="badge bg-success-subtle text-success small" id="sseLiveBadge">
+            <i class="bi bi-broadcast me-1"></i>Live Stream Active
+        </span>
+    </div>
+    <div class="content-card-body">
+        <div style="height: 240px; position: relative;">
+            <canvas id="telemetryChart"></canvas>
+        </div>
+    </div>
+</div>
+
 <!-- ---- Device Overview Table ---- -->
 <div class="content-card mb-4">
-    <div class="content-card-header">
-        <h6 class="mb-0"><i class="bi bi-table me-2"></i>Device Overview</h6>
+    <div class="content-card-header d-flex justify-content-between align-items-center">
+        <h6 class="mb-0"><i class="bi bi-table me-2"></i>Fleet Overview</h6>
+        <div>
+            <a href="/api/reports/devices" class="btn btn-sm btn-outline-primary" download>
+                <i class="bi bi-download me-1"></i>Export Fleet CSV
+            </a>
+        </div>
     </div>
     <div class="content-card-body">
         <div class="table-responsive">
@@ -86,6 +157,7 @@
                         <th>Operating System</th>
                         <th>Processor (CPU)</th>
                         <th>RAM</th>
+                        <th>Live Load</th>
                         <th>Status</th>
                     </tr>
                 </thead>
@@ -97,8 +169,15 @@
     </div>
 </div>
 
-<div class="alert alert-info" role="note">
-    Live resource monitoring is not enabled. The dashboard displays registered database records.
+<!-- ---- Endpoint Agent Integration Box ---- -->
+<div class="content-card mb-4">
+    <div class="content-card-body d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <h6 class="mb-1"><i class="bi bi-terminal me-2 text-primary"></i>Endpoint Telemetry Agent</h6>
+            <small class="text-muted">Stream live resource metrics and diagnostic inspections from any client computer.</small>
+        </div>
+        <code>python agent/devmonitor_agent.py --server {{ request.host_url.rstrip('/') }} --register --username {{ current_user.username }}</code>
+    </div>
 </div>
 
 {% endblock %}

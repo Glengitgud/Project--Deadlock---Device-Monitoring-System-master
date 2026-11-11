@@ -34,9 +34,12 @@
                 </select>
             </div>
             <!-- Spacer -->
-            <div class="col-md-2"></div>
-            <!-- Add Device Button -->
-            <div class="col-md-3 text-end">
+            <div class="col-md-1"></div>
+            <!-- Actions -->
+            <div class="col-md-4 text-end d-flex justify-content-end gap-2">
+                <a href="/api/reports/devices" class="btn btn-outline-secondary" download title="Export devices to CSV">
+                    <i class="bi bi-download me-1"></i>Export CSV
+                </a>
                 <button class="btn btn-primary" id="addDeviceBtn"
                         onclick="openDeviceModal('add')">
                     <i class="bi bi-plus-circle me-1"></i>Register Device
@@ -219,12 +222,14 @@
                 </div>
                 <!-- Scan Results Section (shown after scan) -->
                 <div id="scanResults" class="d-none">
-                    <div class="alert alert-warning mb-3">
-                        <i class="bi bi-exclamation-triangle me-1"></i>
-                        No hardware checks are implemented yet. This entry is saved
-                        to diagnostic history and does not represent a real scan.
+                    <div class="alert alert-success d-flex align-items-center mb-3 py-2">
+                        <i class="bi bi-check-circle-fill me-2 fs-5"></i>
+                        <div>
+                            <strong>Diagnostic Scan Completed</strong>
+                            <div class="small" id="scanSummaryText">All hardware components evaluated.</div>
+                        </div>
                     </div>
-                    <table class="table table-sm">
+                    <table class="table table-sm align-middle">
                         <tbody id="scanResultsBody">
                             <!-- Populated by JavaScript -->
                         </tbody>
@@ -235,6 +240,97 @@
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
                     Close
                 </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ======================================================
+     DEVICE HISTORY MODAL (Diagnostics & Network)
+     ====================================================== -->
+<div class="modal fade" id="historyModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-clock-history me-2"></i>Device History: <span id="historyDeviceName"></span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Nav tabs -->
+                <ul class="nav nav-tabs mb-3" id="historyTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="diagnostics-tab" data-bs-toggle="tab"
+                                data-bs-target="#diagnosticsTabPane" type="button" role="tab">
+                            <i class="bi bi-shield-pulse me-1"></i>Diagnostic Runs
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="network-tab" data-bs-toggle="tab"
+                                data-bs-target="#networkTabPane" type="button" role="tab">
+                            <i class="bi bi-ethernet me-1"></i>Network Snapshots
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="metrics-tab" data-bs-toggle="tab"
+                                data-bs-target="#metricsTabPane" type="button" role="tab">
+                            <i class="bi bi-activity me-1"></i>Telemetry Chart
+                        </button>
+                    </li>
+                </ul>
+
+                <div class="tab-content">
+                    <!-- Diagnostic Runs Tab -->
+                    <div class="tab-pane fade show active" id="diagnosticsTabPane" role="tabpanel">
+                        <div class="table-responsive" style="max-height: 340px; overflow-y: auto;">
+                            <table class="table table-hover table-sm align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Result</th>
+                                        <th>Problem</th>
+                                        <th>Recommendation</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="historyDiagnosticsBody">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Network Snapshots Tab -->
+                    <div class="tab-pane fade" id="networkTabPane" role="tabpanel">
+                        <div class="table-responsive" style="max-height: 340px; overflow-y: auto;">
+                            <table class="table table-hover table-sm align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>IP Address</th>
+                                        <th>Subnet Mask</th>
+                                        <th>Gateway</th>
+                                        <th>DNS</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="historyNetworkBody">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Telemetry Chart Tab -->
+                    <div class="tab-pane fade" id="metricsTabPane" role="tabpanel">
+                        <div style="height: 250px; position: relative;">
+                            <canvas id="deviceMetricChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
             </div>
         </div>
     </div>
