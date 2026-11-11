@@ -1,0 +1,273 @@
+    {% extends "base.html" %}
+
+{% block title %}My Devices - Device Monitoring System{% endblock %}
+{% block page_title %}My Devices{% endblock %}
+
+{% block content %}
+<div class="alert alert-info" role="note">
+    Hardware and network details are collected from the computer running Flask.
+    Collecting details from remote endpoints requires an installed device agent.
+</div>
+
+<!-- ---- Action Bar: Search, Sort, Add ---- -->
+<div class="content-card mb-4">
+    <div class="content-card-body">
+        <div class="row g-2 align-items-center">
+            <!-- Search Field -->
+            <div class="col-md-4">
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="text" class="form-control" id="deviceSearchInput"
+                           placeholder="Search devices by name...">
+                </div>
+            </div>
+            <!-- Sort Dropdown -->
+            <div class="col-md-3">
+                <select class="form-select" id="deviceSortSelect">
+                    <option value="name-asc">Name (A–Z)</option>
+                    <option value="name-desc">Name (Z–A)</option>
+                    <option value="status-asc">Status (Online first)</option>
+                    <option value="status-desc">Status (Offline first)</option>
+                    <option value="type-asc">Type (A–Z)</option>
+                    <option value="date-desc">Newest First</option>
+                    <option value="date-asc">Oldest First</option>
+                </select>
+            </div>
+            <!-- Spacer -->
+            <div class="col-md-2"></div>
+            <!-- Add Device Button -->
+            <div class="col-md-3 text-end">
+                <button class="btn btn-primary" id="addDeviceBtn"
+                        onclick="openDeviceModal('add')">
+                    <i class="bi bi-plus-circle me-1"></i>Register Device
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ---- Devices Table ---- -->
+<div class="content-card mb-4">
+    <div class="content-card-header">
+        <h6 class="mb-0"><i class="bi bi-laptop me-2"></i>Registered Devices</h6>
+    </div>
+    <div class="content-card-body">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>Device Name</th>
+                        <th>Type</th>
+                        <th>OS</th>
+                        <th>CPU</th>
+                        <th>RAM</th>
+                        <th>Storage</th>
+                        <th>Status</th>
+                        <th>Last Updated</th>
+                        <th class="text-center">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="devicesTableBody">
+                    <!-- Populated by JavaScript -->
+                </tbody>
+            </table>
+        </div>
+        <!-- Pagination -->
+        <nav class="mt-3">
+            <ul class="pagination justify-content-center mb-0" id="devicesPagination">
+                <!-- Populated by JavaScript -->
+            </ul>
+        </nav>
+    </div>
+</div>
+
+<!-- ======================================================
+     DEVICE MODAL (Add / Edit / View)
+     A single reusable modal for all device form actions.
+     ====================================================== -->
+<div class="modal fade" id="deviceModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <!-- Modal Header -->
+            <div class="modal-header">
+                <h5 class="modal-title" id="deviceModalTitle">Register Device</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <!-- Modal Body: Device Form -->
+            <div class="modal-body">
+                <form id="deviceForm" novalidate>
+                    <!-- Hidden field to store device ID when editing -->
+                    <input type="hidden" id="deviceFormId">
+                    <!-- Hidden field to track modal mode -->
+                    <input type="hidden" id="deviceFormMode">
+
+                    <div class="row g-3">
+                        <!-- Device Name -->
+                        <div class="col-md-6">
+                            <label for="deviceFormName" class="form-label">Device Name *</label>
+                            <input type="text" class="form-control" id="deviceFormName"
+                                   placeholder="e.g., OFFICE-PC-001" maxlength="120" required>
+                            <div class="invalid-feedback">Please enter a device name.</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="deviceFormHostname" class="form-label">Hostname</label>
+                            <input type="text" class="form-control" id="deviceFormHostname"
+                                   maxlength="255" placeholder="Defaults to device name">
+                        </div>
+                        <!-- Device Type -->
+                        <div class="col-md-6">
+                            <label for="deviceFormType" class="form-label">Device Type *</label>
+                            <select class="form-select" id="deviceFormType" required>
+                                <option value="">Select type...</option>
+                                <option value="Desktop">Desktop</option>
+                                <option value="Laptop">Laptop</option>
+                                <option value="Server">Server</option>
+                                <option value="Workstation">Workstation</option>
+                            </select>
+                            <div class="invalid-feedback">Please select a device type.</div>
+                        </div>
+                        <!-- Operating System -->
+                        <div class="col-md-6">
+                            <label for="deviceFormOS" class="form-label">Operating System *</label>
+                            <select class="form-select" id="deviceFormOS" required>
+                                <option value="">Select OS...</option>
+                                <option value="Windows 11 Pro">Windows 11 Pro</option>
+                                <option value="Windows 11 Home">Windows 11 Home</option>
+                                <option value="Windows 11 Education">Windows 11 Education</option>
+                                <option value="Windows 10 Pro">Windows 10 Pro</option>
+                                <option value="Windows 10 Home">Windows 10 Home</option>
+                                <option value="Ubuntu 22.04 LTS">Ubuntu 22.04 LTS</option>
+                                <option value="macOS Sonoma">macOS Sonoma</option>
+                            </select>
+                            <div class="invalid-feedback">Please select an operating system.</div>
+                        </div>
+                        <!-- Hardware fields are populated from the application host. -->
+                        <div class="col-md-6">
+                            <label for="deviceFormCPU" class="form-label">Processor (CPU)</label>
+                            <input type="text" class="form-control" id="deviceFormCPU" readonly>
+                        </div>
+                        <!-- RAM -->
+                        <div class="col-md-6">
+                            <label for="deviceFormRAM" class="form-label">RAM</label>
+                            <input type="text" class="form-control" id="deviceFormRAM" readonly>
+                        </div>
+                        <!-- Storage -->
+                        <div class="col-md-6">
+                            <label for="deviceFormStorage" class="form-label">Storage</label>
+                            <input type="text" class="form-control" id="deviceFormStorage" readonly>
+                        </div>
+                        <!-- Owner -->
+                        <div class="col-md-6">
+                            <label for="deviceFormOwner" class="form-label">Assigned User</label>
+                            <input type="text" class="form-control" id="deviceFormOwner"
+                                   placeholder="e.g., John Smith">
+                        </div>
+                        <!-- Status -->
+                        <div class="col-md-6">
+                            <label for="deviceFormStatus" class="form-label">Status</label>
+                            <select class="form-select" id="deviceFormStatus">
+                                <option value="online">Online</option>
+                                <option value="offline">Offline</option>
+                                <option value="maintenance">Maintenance</option>
+                                <option value="unknown">Unknown</option>
+                            </select>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <!-- Modal Footer -->
+            <div class="modal-footer" id="deviceModalFooter">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    Cancel
+                </button>
+                <button type="button" class="btn btn-primary" id="saveDeviceBtn"
+                        onclick="saveDevice()">
+                    <i class="bi bi-check-circle me-1"></i>Save Device
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ======================================================
+     SCAN DEVICE MODAL
+     Persists a diagnostic history entry; it does not run hardware checks.
+     ====================================================== -->
+<div class="modal fade" id="scanModal" tabindex="-1" aria-hidden="true"
+     data-bs-backdrop="static">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-search me-2"></i>Device Scan
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                        id="scanCloseBtn"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Scan Progress Section (shown during scan) -->
+                <div id="scanProgress" class="text-center">
+                    <div class="spinner-border text-primary mb-3" role="status">
+                        <span class="visually-hidden">Scanning...</span>
+                    </div>
+                    <p class="fw-semibold">Recording diagnostic history...</p>
+                    <div class="progress mb-2" style="height: 10px;">
+                        <div id="scanProgressBar" class="progress-bar progress-bar-striped
+                             progress-bar-animated" style="width: 0%"></div>
+                    </div>
+                    <small class="text-muted" id="scanProgressText">Initializing scan...</small>
+                </div>
+                <!-- Scan Results Section (shown after scan) -->
+                <div id="scanResults" class="d-none">
+                    <div class="alert alert-warning mb-3">
+                        <i class="bi bi-exclamation-triangle me-1"></i>
+                        No hardware checks are implemented yet. This entry is saved
+                        to diagnostic history and does not represent a real scan.
+                    </div>
+                    <table class="table table-sm">
+                        <tbody id="scanResultsBody">
+                            <!-- Populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ======================================================
+     DELETE DEVICE CONFIRMATION MODAL
+     ====================================================== -->
+<div class="modal fade" id="deleteDeviceModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-archive me-2"></i>Archive Device
+                </h5>
+                <button type="button" class="btn-close btn-close-white"
+                        data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to archive
+                   <strong id="deleteDeviceName"></strong>?</p>
+                <p class="text-muted small">The device will be retired. Diagnostic and network history will be retained.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    Cancel
+                </button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteDeviceBtn">
+                    <i class="bi bi-archive me-1"></i>Archive
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
