@@ -477,7 +477,7 @@ def create_app(test_config=None):
         ]
         db.session.commit()
         click.echo("Database tables and default RBAC roles are ready.")
-
+#
     @app.cli.command("create-admin")
     @click.option("--username", prompt=True)
     @click.option("--email", prompt=True)
