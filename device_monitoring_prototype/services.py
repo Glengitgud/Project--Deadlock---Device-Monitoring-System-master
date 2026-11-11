@@ -25,6 +25,10 @@ class ValidationError(ValueError):
     """Raised when submitted data fails application validation."""
 
 
+class DatabaseSetupError(RuntimeError):
+    """Raised when required seed data is missing from the database."""
+
+
 def _text(data, key, *, required=False, limit):
     value = data.get(key)
     if value is None:
@@ -49,7 +53,7 @@ def _required_text(data, key, limit):
 def _role(name):
     role = Role.query.filter_by(name=name).one_or_none()
     if role is None:
-        raise RuntimeError(
+        raise DatabaseSetupError(
             "Database roles are missing; run "
             "`flask --app python.app init-db` from device_monitoring_prototype."
         )

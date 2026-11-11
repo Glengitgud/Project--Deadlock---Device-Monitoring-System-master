@@ -26,7 +26,9 @@ from flask_login import (
     login_user,
     logout_user,
 )
+from dotenv import load_dotenv
 from sqlalchemy import func
+from sqlalchemy.exc import SQLAlchemyError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from device_monitoring_prototype.models import (
@@ -37,6 +39,7 @@ from device_monitoring_prototype.models import (
     db,
 )
 from device_monitoring_prototype.services import (
+    DatabaseSetupError,
     ValidationError,
     archive_device,
     create_device,
@@ -67,6 +70,7 @@ def _database_uri():
 
 def create_app(test_config=None):
     project_dir = Path(__file__).resolve().parent
+    load_dotenv(dotenv_path=project_dir / ".env")
     app = Flask(
         __name__,
         template_folder=str(project_dir / "templates"),
@@ -91,6 +95,18 @@ def create_app(test_config=None):
 
     db.init_app(app)
     login_manager.init_app(app)
+
+    @app.errorhandler(SQLAlchemyError)
+    def handle_database_error(error):
+        db.session.rollback()
+        app.logger.error("Database request failed (%s).", type(error).__name__)
+        message = (
+            "The database is unavailable. Check the MySQL settings in "
+            "device_monitoring_prototype\\.env and run the database setup commands."
+        )
+        if request.path.startswith("/api/"):
+            return jsonify(error=message), 503
+        return render_template("service_unavailable.html", message=message), 503
 
     @login_manager.unauthorized_handler
     def handle_unauthorized():
@@ -242,6 +258,12 @@ def create_app(test_config=None):
             except ValidationError as error:
                 flash(str(error), "danger")
                 return render_template("register.html"), 400
+            except DatabaseSetupError as error:
+                app.logger.error("Account registration blocked: %s", error)
+                return render_template(
+                    "service_unavailable.html",
+                    message=str(error),
+                ), 503
             flash("Account created. You can now sign in.", "success")
             return redirect(url_for("login"))
         return render_template("register.html")

@@ -1,10 +1,12 @@
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from werkzeug.security import check_password_hash
 from werkzeug.security import generate_password_hash
 
 from device_monitoring_prototype.app import create_app
+from device_monitoring_prototype.app import app as default_app
 from device_monitoring_prototype.models import (
     Device,
     DiagnosticRun,
@@ -87,6 +89,70 @@ class DatabaseIntegrationTest(unittest.TestCase):
     def test_login_and_registration_pages_render(self):
         self.assertEqual(self.client.get("/").status_code, 200)
         self.assertEqual(self.client.get("/register").status_code, 200)
+
+    def test_environment_file_is_loaded_from_application_directory(self):
+        with patch("device_monitoring_prototype.app.load_dotenv") as load_dotenv:
+            create_app(
+                {
+                    "TESTING": True,
+                    "SQLALCHEMY_DATABASE_URI": "sqlite://",
+                }
+            )
+        load_dotenv.assert_called_once_with(
+            dotenv_path=Path(default_app.root_path, ".env")
+        )
+
+    def test_all_standard_user_pages_and_apis_render(self):
+        self.register_and_login()
+        for path in ("/dashboard", "/devices", "/api/dashboard", "/api/devices"):
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path).status_code, 200)
+        static_response = self.client.get("/static/css/style.css")
+        self.assertEqual(static_response.status_code, 200)
+        static_response.close()
+
+    def test_auth_forms_report_database_setup_errors_without_500(self):
+        app = create_app(
+            {
+                "TESTING": True,
+                "SECRET_KEY": "database-error-test-secret",
+                "SQLALCHEMY_DATABASE_URI": "sqlite://",
+            }
+        )
+        client = app.test_client()
+        try:
+            client.get("/login")
+            with client.session_transaction() as session:
+                token = session["_csrf_token"]
+            login_response = client.post(
+                "/login",
+                data={
+                    "csrf_token": token,
+                    "username": "missing",
+                    "password": "unused",
+                },
+            )
+            self.assertEqual(login_response.status_code, 503)
+            self.assertIn(b"database is unavailable", login_response.data.lower())
+
+            with app.app_context():
+                db.create_all()
+            register_response = client.post(
+                "/register",
+                data={
+                    "csrf_token": token,
+                    "full_name": "Test User",
+                    "email": "setup@example.com",
+                    "username": "setupuser",
+                    "password": "correct-horse-battery-staple",
+                },
+            )
+            self.assertEqual(register_response.status_code, 503)
+            self.assertIn(b"init-db", register_response.data)
+        finally:
+            with app.app_context():
+                db.session.remove()
+                db.drop_all()
 
     def test_registration_login_and_password_hash(self):
         self.register_and_login()

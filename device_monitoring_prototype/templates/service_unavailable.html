@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Database unavailable - DevMonitor</title>
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body class="login-page">
+    <main class="login-container">
+        <section class="login-card">
+            <div class="login-header">
+                <h3>Database unavailable</h3>
+                <p>{{ message }}</p>
+            </div>
+            <p class="text-center mb-0">
+                <a href="{{ url_for('login') }}">Return to sign in</a>
+            </p>
+        </section>
+    </main>
+</body>
+</html>

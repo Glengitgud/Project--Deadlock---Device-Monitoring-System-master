@@ -23,6 +23,7 @@ DevMonitor is a Flask application for centralized end-user device inventory and 
 The app also accepts a `DATABASE_URL`, for example:
 `mysql+pymysql://devmonitor_app:password@127.0.0.1:3306/devmonitor?charset=utf8mb4`.
 Set `COOKIE_SECURE=true` when using HTTPS. The generated fallback session key is only suitable for local development; set a persistent `SECRET_KEY` for normal use.
+The app loads `device_monitoring_prototype\.env` explicitly when started from the repository root. Login and registration require valid MySQL credentials, an initialized schema, and seeded roles. If the database is unavailable, the app displays a setup message instead of returning a generic 500 page.
 
 ## Features
 
