@@ -1,15 +1,18 @@
 """Flask application with database-backed accounts and device inventory."""
 
+import json
 import os
+import queue
 import re
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote_plus, urljoin, urlsplit
 
 import click
 from flask import (
     Flask,
+    Response,
     abort,
     flash,
     jsonify,
@@ -30,8 +33,14 @@ from sqlalchemy import func
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .models import (
+    ActivityLog,
     Alert,
     Device,
+    DeviceMetric,
+    DeviceSpecification,
+    DiagnosticCheck,
+    DiagnosticRun,
+    NetworkRecord,
     Permission,
     Role,
     User,
@@ -47,6 +56,8 @@ from .security import (
 )
 from .services import (
     ValidationError,
+    _required_text,
+    _text,
     archive_device,
     create_device,
     create_user,
@@ -56,6 +67,7 @@ from .services import (
     update_device,
     update_user,
 )
+from .system_info import collect_hardware, collect_network
 
 
 login_manager = LoginManager()
@@ -193,8 +205,52 @@ def create_app(test_config=None):
         if not current_user.is_admin and device.owner_user_id != current_user.id:
             abort(404)
 
+    _event_listeners = []
+
+    def broadcast_event(event_type, data):
+        payload = json.dumps({"event": event_type, "data": data})
+        for q in list(_event_listeners):
+            try:
+                q.put_nowait(payload)
+            except Exception:
+                if q in _event_listeners:
+                    _event_listeners.remove(q)
+
+    def trigger_alert(device, severity, title, message):
+        recent = Alert.query.filter(
+            Alert.device_id == device.id,
+            Alert.title == title,
+            Alert.created_at >= datetime.now(timezone.utc) - timedelta(minutes=15),
+        ).first()
+        if not recent:
+            alert = Alert(
+                device=device,
+                severity=severity,
+                title=title,
+                message=message,
+                is_read=False,
+            )
+            db.session.add(alert)
+            broadcast_event(
+                "alert.created",
+                {
+                    "id": alert.id,
+                    "device_id": device.id,
+                    "device_name": device.device_name,
+                    "severity": severity,
+                    "title": title,
+                    "message": message,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+
     def serialize_device(device):
         spec = device.hardware_spec
+        latest_metric = (
+            DeviceMetric.query.filter_by(device_id=device.id)
+            .order_by(DeviceMetric.collected_at.desc())
+            .first()
+        )
         return {
             "id": device.id,
             "name": device.device_name,
@@ -214,6 +270,22 @@ def create_app(test_config=None):
                 if spec and spec.storage_bytes
                 else "—"
             ),
+            "cpu_percent": (
+                float(latest_metric.cpu_percent)
+                if latest_metric and latest_metric.cpu_percent is not None
+                else None
+            ),
+            "memory_percent": (
+                float(latest_metric.memory_percent)
+                if latest_metric and latest_metric.memory_percent is not None
+                else None
+            ),
+            "storage_percent": (
+                float(latest_metric.storage_percent)
+                if latest_metric and latest_metric.storage_percent is not None
+                else None
+            ),
+            "api_token": device.api_token or "",
             "status": device.status.capitalize(),
             "registered": device.registered_at.isoformat() if device.registered_at else "",
             "lastUpdated": (
@@ -488,6 +560,10 @@ def create_app(test_config=None):
     def add_device():
         try:
             device = create_device(current_user, api_data())
+            broadcast_event(
+                "fleet.updated",
+                {"action": "added", "device": serialize_device(device)},
+            )
         except ValidationError as error:
             return api_error(error)
         return jsonify(serialize_device(device)), 201
@@ -499,6 +575,10 @@ def create_app(test_config=None):
         can_manage_device(device)
         try:
             update_device(device, api_data())
+            broadcast_event(
+                "fleet.updated",
+                {"action": "updated", "device": serialize_device(device)},
+            )
         except ValidationError as error:
             return api_error(error)
         return jsonify(serialize_device(device))
@@ -509,6 +589,10 @@ def create_app(test_config=None):
         device = db.get_or_404(Device, device_id)
         can_manage_device(device)
         archive_device(device)
+        broadcast_event(
+            "fleet.updated",
+            {"action": "archived", "device_id": device_id},
+        )
         return "", 204
 
     @app.post("/api/devices/<int:device_id>/diagnostics")
@@ -524,6 +608,15 @@ def create_app(test_config=None):
             detected_problem=run.detected_problem,
             recommendation=run.recommendation,
             scanned_at=run.started_at.isoformat(),
+            checks=[
+                {
+                    "name": check.check_name,
+                    "category": check.category,
+                    "status": check.status,
+                    "summary": check.result_summary,
+                }
+                for check in run.checks
+            ],
         ), 201
 
     @app.get("/api/devices/<int:device_id>/history")
@@ -540,6 +633,15 @@ def create_app(test_config=None):
                     "problem": run.detected_problem,
                     "recommendation": run.recommendation,
                     "scanned_at": run.started_at.isoformat(),
+                    "checks": [
+                        {
+                            "name": c.check_name,
+                            "category": c.category,
+                            "status": c.status,
+                            "summary": c.result_summary,
+                        }
+                        for c in run.checks
+                    ],
                 }
                 for run in sorted(device.diagnostic_runs, key=lambda item: item.started_at, reverse=True)
             ],
@@ -555,6 +657,382 @@ def create_app(test_config=None):
                 for record in sorted(device.network_records, key=lambda item: item.recorded_at, reverse=True)
             ],
         )
+
+    # ------------------------------------------------------------------
+    # Real-Time Telemetry & Endpoint Agent Endpoints
+    # ------------------------------------------------------------------
+
+    @app.post("/api/agent/register")
+    def agent_register():
+        data = api_data()
+        username = data.get("username", "").strip()
+        password = data.get("password", "")
+        user = User.query.filter(func.lower(User.username) == username.lower()).first()
+        if not user or not user.is_active or not check_password_hash(user.password_hash, password):
+            return api_error("Invalid user credentials.", 401)
+
+        name = _required_text(data, "name", limit=120)
+        hostname = _text(data, "hostname", limit=255) or name
+        device_type = _required_text(data, "type", limit=64)
+        operating_system = _text(data, "os", limit=120) or "Unknown OS"
+
+        token = secrets.token_hex(32)
+        device = Device(
+            asset_tag=f"DM-{secrets.token_hex(8).upper()}",
+            api_token=token,
+            device_name=name,
+            hostname=hostname,
+            device_type=device_type,
+            operating_system=operating_system,
+            operating_system_version=operating_system,
+            status="online",
+            owner=user,
+            registered_by=user,
+            last_seen_at=datetime.now(timezone.utc),
+        )
+
+        hw_payload = data.get("hardware")
+        if isinstance(hw_payload, dict):
+            spec_data = {
+                "cpu_model": hw_payload.get("cpu_model"),
+                "cpu_cores": hw_payload.get("cpu_cores"),
+                "cpu_threads": hw_payload.get("cpu_threads"),
+                "memory_bytes": hw_payload.get("memory_bytes"),
+                "storage_bytes": hw_payload.get("storage_bytes"),
+                "operating_system_version": hw_payload.get("operating_system_version"),
+            }
+        else:
+            spec_data = collect_hardware()
+        device.hardware_spec = DeviceSpecification(**spec_data)
+
+        net_payload = data.get("network")
+        if isinstance(net_payload, dict):
+            net_data = {
+                "ip_address": net_payload.get("ip_address"),
+                "subnet_mask": net_payload.get("subnet_mask"),
+                "default_gateway": net_payload.get("default_gateway"),
+                "dns_server": net_payload.get("dns_server"),
+                "connectivity_status": net_payload.get("connectivity_status", "connected"),
+            }
+        else:
+            net_data = collect_network()
+        device.network_records.append(NetworkRecord(**net_data))
+
+        db.session.add(device)
+        db.session.flush()
+        log_activity("agent.device.registered", "device", device.id, {"hostname": hostname}, actor_id=user.id)
+        db.session.commit()
+
+        broadcast_event("fleet.updated", {"action": "added", "device": serialize_device(device)})
+
+        return jsonify(
+            message="Device registered successfully with agent.",
+            device_id=device.id,
+            token=token,
+            asset_tag=device.asset_tag,
+        ), 201
+
+    @app.post("/api/agent/metrics")
+    def agent_metrics():
+        token = request.headers.get("X-Device-Token") or request.headers.get("X-Agent-Token")
+        if not token:
+            return api_error("Missing X-Device-Token header.", 401)
+        device = Device.query.filter_by(api_token=token).first()
+        if not device or device.status == "retired":
+            return api_error("Invalid device token.", 401)
+
+        data = api_data()
+        now = datetime.now(timezone.utc)
+        device.last_seen_at = now
+        device.status = "online"
+
+        cpu_pct = data.get("cpu_percent")
+        mem_pct = data.get("memory_percent")
+        storage_pct = data.get("storage_percent")
+
+        sample = DeviceMetric(
+            device=device,
+            cpu_percent=cpu_pct,
+            memory_percent=mem_pct,
+            storage_percent=storage_pct,
+            memory_used_bytes=data.get("memory_used_bytes"),
+            storage_used_bytes=data.get("storage_used_bytes"),
+            network_rx_bytes=data.get("network_rx_bytes"),
+            network_tx_bytes=data.get("network_tx_bytes"),
+            collected_at=now,
+        )
+        db.session.add(sample)
+
+        # Threshold evaluation
+        if cpu_pct is not None and float(cpu_pct) >= 85.0:
+            trigger_alert(
+                device=device,
+                severity="critical" if float(cpu_pct) >= 95.0 else "warning",
+                title=f"High CPU utilization on {device.device_name}",
+                message=f"CPU load reached {cpu_pct}% on {device.device_name}.",
+            )
+        if storage_pct is not None and float(storage_pct) >= 90.0:
+            trigger_alert(
+                device=device,
+                severity="critical" if float(storage_pct) >= 95.0 else "warning",
+                title=f"Low disk space on {device.device_name}",
+                message=f"Storage utilization reached {storage_pct}% on {device.device_name}.",
+            )
+
+        db.session.commit()
+
+        broadcast_event(
+            "device.metrics",
+            {
+                "device_id": device.id,
+                "device_name": device.device_name,
+                "status": "Online",
+                "cpu": cpu_pct,
+                "ram": mem_pct,
+                "storage": storage_pct,
+                "lastUpdated": now.isoformat(),
+            },
+        )
+
+        return jsonify(status="ok", recorded_at=now.isoformat())
+
+    @app.post("/api/agent/diagnostics")
+    def agent_diagnostics():
+        token = request.headers.get("X-Device-Token") or request.headers.get("X-Agent-Token")
+        if not token:
+            return api_error("Missing X-Device-Token header.", 401)
+        device = Device.query.filter_by(api_token=token).first()
+        if not device or device.status == "retired":
+            return api_error("Invalid device token.", 401)
+
+        data = api_data()
+        checks_data = data.get("checks", [])
+        now = datetime.now(timezone.utc)
+
+        has_failure = any(c.get("status") == "failed" for c in checks_data)
+        has_warning = any(c.get("status") == "warning" for c in checks_data)
+
+        run = DiagnosticRun(
+            device=device,
+            initiated_by=device.owner,
+            status="completed",
+            summary=f"Agent diagnostic reported {len(checks_data)} check(s).",
+            detected_problem="Hardware anomaly detected." if has_failure else ("Warning thresholds reached." if has_warning else None),
+            recommendation="Review system logs and inspect resources." if (has_failure or has_warning) else "System operating nominally.",
+            started_at=now,
+            finished_at=now,
+        )
+
+        for c in checks_data:
+            run.checks.append(
+                DiagnosticCheck(
+                    check_name=c.get("check_name", "Diagnostic Check"),
+                    category=c.get("category", "system"),
+                    status=c.get("status", "passed"),
+                    result_summary=c.get("result_summary"),
+                    details=c.get("details"),
+                    measured_at=now,
+                )
+            )
+
+        db.session.add(run)
+        log_activity("agent.diagnostic.recorded", "diagnostic_run", run.id, actor_id=device.owner_user_id)
+        db.session.commit()
+
+        return jsonify(run_id=run.id, status="recorded"), 201
+
+    # ------------------------------------------------------------------
+    # Server-Sent Events (SSE) Stream
+    # ------------------------------------------------------------------
+
+    @app.get("/api/events")
+    @login_required
+    def event_stream():
+        def generate():
+            q = queue.Queue(maxsize=100)
+            _event_listeners.append(q)
+            try:
+                yield f"data: {json.dumps({'event': 'connected'})}\n\n"
+                while True:
+                    try:
+                        msg = q.get(timeout=20.0)
+                        yield f"data: {msg}\n\n"
+                    except queue.Empty:
+                        yield ": ping\n\n"
+            except GeneratorExit:
+                if q in _event_listeners:
+                    _event_listeners.remove(q)
+
+        return Response(generate(), mimetype="text/event-stream")
+
+    # ------------------------------------------------------------------
+    # Alerts & Notification Center Endpoints
+    # ------------------------------------------------------------------
+
+    @app.get("/api/alerts")
+    @login_required
+    def list_alerts():
+        query = Alert.query
+        if not current_user.is_admin:
+            query = query.join(Device).filter(Device.owner_user_id == current_user.id)
+        alerts = query.order_by(Alert.created_at.desc()).limit(50).all()
+        return jsonify([
+            {
+                "id": a.id,
+                "device_id": a.device_id,
+                "device_name": a.device.device_name if a.device else "System",
+                "severity": a.severity,
+                "title": a.title,
+                "message": a.message,
+                "is_read": a.is_read,
+                "created_at": a.created_at.isoformat(),
+            }
+            for a in alerts
+        ])
+
+    @app.post("/api/alerts/<int:alert_id>/read")
+    @login_required
+    def mark_alert_read(alert_id):
+        alert = db.get_or_404(Alert, alert_id)
+        if not current_user.is_admin and alert.device and alert.device.owner_user_id != current_user.id:
+            abort(403)
+        alert.is_read = True
+        db.session.commit()
+        return jsonify(status="ok")
+
+    @app.post("/api/alerts/clear-all")
+    @login_required
+    def clear_all_alerts():
+        query = Alert.query
+        if not current_user.is_admin:
+            query = query.join(Device).filter(Device.owner_user_id == current_user.id)
+        query.filter_by(is_read=False).update({Alert.is_read: True})
+        db.session.commit()
+        return jsonify(status="ok")
+
+    # ------------------------------------------------------------------
+    # Telemetry History & Exportable Reports
+    # ------------------------------------------------------------------
+
+    @app.get("/api/devices/<int:device_id>/metrics/history")
+    @login_required
+    def device_metrics_history(device_id):
+        device = db.get_or_404(Device, device_id)
+        can_manage_device(device)
+        metrics = (
+            DeviceMetric.query.filter_by(device_id=device_id)
+            .order_by(DeviceMetric.collected_at.desc())
+            .limit(30)
+            .all()
+        )
+        return jsonify([
+            {
+                "time": m.collected_at.strftime("%H:%M:%S"),
+                "timestamp": m.collected_at.isoformat(),
+                "cpu": float(m.cpu_percent) if m.cpu_percent is not None else 0.0,
+                "ram": float(m.memory_percent) if m.memory_percent is not None else 0.0,
+                "storage": float(m.storage_percent) if m.storage_percent is not None else 0.0,
+            }
+            for m in reversed(metrics)
+        ])
+
+    @app.get("/api/reports/devices")
+    @login_required
+    def export_devices_csv():
+        import csv
+        import io
+        from flask import make_response
+
+        query = Device.query.filter(Device.status != "retired")
+        if not current_user.is_admin:
+            query = query.filter_by(owner_user_id=current_user.id)
+        devices = query.order_by(Device.id.asc()).all()
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "Asset Tag",
+            "Device Name",
+            "Hostname",
+            "Type",
+            "OS",
+            "Owner",
+            "Status",
+            "CPU Model",
+            "RAM (GB)",
+            "Storage (GB)",
+            "Last Seen",
+            "Registered At",
+        ])
+        for d in devices:
+            spec = d.hardware_spec
+            ram_gb = round(spec.memory_bytes / (1024**3), 1) if spec and spec.memory_bytes else "N/A"
+            storage_gb = round(spec.storage_bytes / (1024**3), 1) if spec and spec.storage_bytes else "N/A"
+            writer.writerow([
+                d.asset_tag,
+                d.device_name,
+                d.hostname,
+                d.device_type,
+                d.operating_system,
+                d.owner.full_name,
+                d.status.capitalize(),
+                spec.cpu_model if spec else "N/A",
+                ram_gb,
+                storage_gb,
+                d.last_seen_at.isoformat() if d.last_seen_at else "Never",
+                d.registered_at.isoformat(),
+            ])
+
+        response = make_response(output.getvalue())
+        response.headers["Content-Disposition"] = "attachment; filename=devmonitor_fleet_report.csv"
+        response.headers["Content-Type"] = "text/csv; charset=utf-8"
+        return response
+
+    @app.get("/api/reports/activity")
+    @admin_required
+    def export_activity_csv():
+        import csv
+        import io
+        from flask import make_response
+
+        logs = ActivityLog.query.order_by(ActivityLog.occurred_at.desc()).limit(1000).all()
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["ID", "Timestamp", "Actor", "Event Type", "Entity Type", "Entity ID", "Details"])
+        for log in logs:
+            writer.writerow([
+                log.id,
+                log.occurred_at.isoformat(),
+                log.actor.username if log.actor else "System",
+                log.event_type,
+                log.entity_type or "",
+                log.entity_id or "",
+                json.dumps(log.details) if log.details else "",
+            ])
+
+        response = make_response(output.getvalue())
+        response.headers["Content-Disposition"] = "attachment; filename=devmonitor_audit_logs.csv"
+        response.headers["Content-Type"] = "text/csv; charset=utf-8"
+        return response
+
+    @app.get("/api/audit-logs")
+    @admin_required
+    def list_audit_logs():
+        limit = min(int(request.args.get("limit", 100)), 500)
+        logs = ActivityLog.query.order_by(ActivityLog.occurred_at.desc()).limit(limit).all()
+        return jsonify([
+            {
+                "id": log.id,
+                "timestamp": log.occurred_at.isoformat(),
+                "actor": log.actor.username if log.actor else "System",
+                "actor_id": log.actor_user_id,
+                "event": log.event_type,
+                "entity": log.entity_type or "—",
+                "entity_id": log.entity_id or "—",
+                "details": log.details or {},
+            }
+            for log in logs
+        ])
 
     @app.get("/api/users")
     @admin_required
@@ -615,11 +1093,50 @@ def create_app(test_config=None):
         if not current_user.is_admin:
             query = query.filter_by(owner_user_id=current_user.id)
         devices = query.order_by(Device.id.desc()).all()
+        serialized_devs = [serialize_device(device) for device in devices]
+
+        valid_cpus = [d["cpu_percent"] for d in serialized_devs if d.get("cpu_percent") is not None]
+        valid_rams = [d["memory_percent"] for d in serialized_devs if d.get("memory_percent") is not None]
+        valid_disks = [d["storage_percent"] for d in serialized_devs if d.get("storage_percent") is not None]
+
+        if valid_cpus:
+            fleet_cpu = round(sum(valid_cpus) / len(valid_cpus), 1)
+        else:
+            try:
+                import psutil
+                fleet_cpu = round(psutil.cpu_percent(interval=0.1), 1)
+            except Exception:
+                fleet_cpu = 0.0
+
+        if valid_rams:
+            fleet_ram = round(sum(valid_rams) / len(valid_rams), 1)
+        else:
+            try:
+                import psutil
+                fleet_ram = round(psutil.virtual_memory().percent, 1)
+            except Exception:
+                fleet_ram = 0.0
+
+        if valid_disks:
+            fleet_disk = round(sum(valid_disks) / len(valid_disks), 1)
+        else:
+            try:
+                import shutil
+                d_usage = shutil.disk_usage(os.path.expanduser("~"))
+                fleet_disk = round((d_usage.used / d_usage.total) * 100, 1)
+            except Exception:
+                fleet_disk = 0.0
+
         return jsonify(
-            devices=[serialize_device(device) for device in devices],
+            devices=serialized_devs,
             total=len(devices),
             online=sum(device.status == "online" for device in devices),
             offline=sum(device.status == "offline" for device in devices),
+            metrics={
+                "cpu": fleet_cpu,
+                "ram": fleet_ram,
+                "storage": fleet_disk,
+            },
         )
 
     @app.cli.command("init-db")

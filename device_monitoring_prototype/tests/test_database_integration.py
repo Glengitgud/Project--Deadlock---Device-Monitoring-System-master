@@ -271,6 +271,54 @@ class DatabaseIntegrationTest(unittest.TestCase):
         )
         self.assertEqual(login_res.status_code, 302)
 
+    def test_endpoint_agent_registration_and_telemetry_flow(self):
+        self.register_and_login()
+        # Register remote agent device
+        reg_resp = self.client.post(
+            "/api/agent/register",
+            json={
+                "username": "testuser",
+                "password": "correct-horse-battery-staple",
+                "name": "Remote-Worker-PC",
+                "hostname": "remote-pc-01",
+                "type": "Laptop",
+                "os": "Ubuntu 24.04",
+            },
+        )
+        self.assertEqual(reg_resp.status_code, 201)
+        data = reg_resp.json
+        device_id = data["device_id"]
+        token = data["token"]
+        self.assertTrue(token)
+
+        # Ingest metrics
+        metric_resp = self.client.post(
+            "/api/agent/metrics",
+            headers={"X-Device-Token": token},
+            json={
+                "cpu_percent": 92.5,
+                "memory_percent": 75.0,
+                "storage_percent": 60.0,
+                "memory_used_bytes": 12 * 1024**3,
+                "storage_used_bytes": 300 * 1024**3,
+                "network_rx_bytes": 1000000,
+                "network_tx_bytes": 500000,
+            },
+        )
+        self.assertEqual(metric_resp.status_code, 200)
+
+        # Check alert was triggered for high CPU (> 85%)
+        alerts_resp = self.client.get("/api/alerts")
+        self.assertEqual(alerts_resp.status_code, 200)
+        alerts = alerts_resp.json
+        self.assertTrue(any("High CPU utilization" in a["title"] for a in alerts))
+
+        # Check CSV export
+        csv_resp = self.client.get("/api/reports/devices")
+        self.assertEqual(csv_resp.status_code, 200)
+        self.assertIn("Remote-Worker-PC", csv_resp.get_data(as_text=True))
+
+
 
 if __name__ == "__main__":
     unittest.main()
