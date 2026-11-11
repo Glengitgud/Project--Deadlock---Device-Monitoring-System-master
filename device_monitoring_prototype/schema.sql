@@ -7,6 +7,10 @@ CREATE TABLE users (
     password_hash VARCHAR(255) NOT NULL,
     display_name VARCHAR(120) NULL,
     status VARCHAR(16) NOT NULL DEFAULT 'active',
+    failed_login_attempts INT NOT NULL DEFAULT 0,
+    locked_until DATETIME NULL,
+    totp_secret VARCHAR(64) NULL,
+    mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     last_login_at DATETIME NULL,
@@ -44,6 +48,7 @@ CREATE TABLE devices (
     model VARCHAR(120) NULL,
     operating_system VARCHAR(120) NULL,
     operating_system_version VARCHAR(120) NULL,
+    api_token VARCHAR(64) NULL,
     status VARCHAR(16) NOT NULL DEFAULT 'unknown',
     owner_user_id BIGINT NOT NULL,
     registered_by_user_id BIGINT NULL,
@@ -53,6 +58,7 @@ CREATE TABLE devices (
     PRIMARY KEY (id),
     UNIQUE KEY uq_devices_asset_tag (asset_tag),
     UNIQUE KEY uq_devices_serial_number (serial_number),
+    UNIQUE KEY uq_devices_api_token (api_token),
     KEY ix_devices_owner_status (owner_user_id, status),
     CONSTRAINT fk_devices_owner FOREIGN KEY (owner_user_id)
         REFERENCES users (id) ON DELETE RESTRICT,
@@ -229,4 +235,21 @@ CREATE TABLE activity_logs (
     KEY ix_activity_logs_entity (entity_type, entity_id),
     CONSTRAINT fk_activity_logs_actor FOREIGN KEY (actor_user_id)
         REFERENCES users (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE alerts (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    device_id BIGINT NULL,
+    severity VARCHAR(16) NOT NULL DEFAULT 'warning',
+    title VARCHAR(120) NOT NULL,
+    message TEXT NOT NULL,
+    is_read BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY ix_alerts_device_time (device_id, created_at),
+    CONSTRAINT fk_alerts_device FOREIGN KEY (device_id)
+        REFERENCES devices (id) ON DELETE CASCADE,
+    CONSTRAINT ck_alerts_severity CHECK (
+        severity IN ('info', 'warning', 'critical')
+    )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
