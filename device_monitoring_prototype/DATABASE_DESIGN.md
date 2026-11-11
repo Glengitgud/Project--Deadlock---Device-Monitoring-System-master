@@ -41,7 +41,7 @@ Database credentials are read from `.env`/environment variables or `DATABASE_URL
 
 ## Database CRUD and backend operations
 
-`python/services.py` implements validated account creation/update/deactivation, device creation/update/archive, and diagnostic history insertion. Flask views in `python/app.py` expose:
+`python/services.py` implements validated account creation/update/deactivation, device creation/update/archive, and diagnostic history insertion. Flask views in `app.py` expose:
 
 | Method and path | Access | Operation |
 |---|---|---|
