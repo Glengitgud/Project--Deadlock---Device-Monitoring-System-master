@@ -6,7 +6,7 @@ import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote_plus, urljoin, urlsplit
-
+#
 import click
 from flask import (
     Flask,
