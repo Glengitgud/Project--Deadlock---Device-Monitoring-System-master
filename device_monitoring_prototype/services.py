@@ -7,7 +7,7 @@ from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import generate_password_hash
 
-from .models import (
+from device_monitoring_prototype.models import (
     ActivityLog,
     Device,
     DiagnosticCheck,
@@ -18,7 +18,7 @@ from .models import (
     User,
     db,
 )
-from .system_info import collect_hardware, collect_network
+from device_monitoring_prototype.system_info import collect_hardware, collect_network
 
 
 class ValidationError(ValueError):

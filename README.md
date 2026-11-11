@@ -1,115 +1,34 @@
-# DevMonitor — Device Monitoring Prototype
+# DevMonitor
 
-A dark minimal, responsive web prototype for a **Centralized End-User Device Monitoring & Diagnostic System**. Built with Flask, Bootstrap 5, and vanilla JavaScript for fleet visibility, telemetry simulation, and device administration.
+DevMonitor is a Flask application for centralized end-user device inventory and diagnostics. It uses Flask-Login, Werkzeug password hashes, Flask-SQLAlchemy, and MySQL 8. The responsive UI supports registration and sign-in, device inventory, history, and administrator user management.
 
----
+## Windows setup
 
-## UI/UX Design System
+Run these commands from the repository root. Create a MySQL 8 database and application user first, then configure the private environment file:
 
-The prototype implements a **dark minimal aesthetic** tailored for operations dashboards and system diagnostics:
-
-| Swatch | Hex Code | Role in Design System |
-|---|---|---|
-| 🟣 Darkest | `#0d0221` | Canvas background, input surfaces, deep base |
-| 🔵 Dark | `#0f084b` | Fixed sidebar navigation, sticky header, card headers |
-| 🔷 Accent | `#26408b` | Primary buttons, active navigation, interactive glow |
-| 🪟 Surface | `#120636` | Elevated cards, modal dialogs, data containers |
-| ⚪ Text | `#f1f5f9` | High-contrast readable typography (WCAG AAA) |
-| 🔘 Muted | `#94a3b8` | Subdued labels, metadata, captions |
-
-### Design Highlights
-- **Clean Authentication**: Removed simulated prototype notices and demo badges from the login page for an authentic, distraction-free interface.
-- **Visual Ergonomics**: Deep purples and midnight blues reduce eye fatigue while maintaining clear component boundaries with subtle borders (`rgba(255, 255, 255, 0.08)`).
-- **Responsive Navigation**: Collapsible sidebar with backdrop overlay on mobile and tablet displays ($\le 992\text{px}$).
-- **Accessible Interactions**: High-contrast close buttons, smooth state transitions, and custom-styled form controls.
-
----
-
-## Quick Start (Windows)
-
-```bash
-# 1. Navigate to the project folder
-cd C:\Users\ehrta\Downloads\Deadlock\device_monitoring_prototype
-
-# 2. Create and activate a virtual environment
-python -m venv venv
-venv\Scripts\activate        # Command Prompt
-# venv\Scripts\Activate.ps1  # PowerShell
-
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Run the application
-python app.py
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r device_monitoring_prototype\requirements.txt
+Copy-Item device_monitoring_prototype\.env.example device_monitoring_prototype\.env
 ```
 
-Open **http://127.0.0.1:5000** in your browser.
+Set the MySQL credentials and a persistent random `SECRET_KEY` in `device_monitoring_prototype\.env`. For a new database, execute `device_monitoring_prototype\schema.sql` in MySQL Workbench. To upgrade the earlier schema, back it up and run `device_monitoring_prototype\migrations\001_database_integration.sql` once.
 
-> **Note:** If PowerShell restricts script execution, run:  
-> `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned`
+Initialize role and permission records, create an administrator, then start the app:
 
----
-
-## Demo Accounts
-
-| Role | Username | Password |
-|---|---|---|
-| Administrator | `admin` | `admin123` |
-| Standard User | `user` | `user123` |
-
----
-
-## Project Structure
-
-```
-device_monitoring_prototype/
-│
-├── app.py                      ← Flask application entry point
-├── requirements.txt            ← Python dependencies (Flask)
-├── features.md                 ← Features specification & UI/UX documentation
-├── FEATURES_AND_FUTURE_WORK.md ← Simulated vs. production comparison
-├── README.md                   ← Setup guide & system overview
-│
-├── templates/
-│   ├── base.html               ← Master layout (sidebar, topbar, toast container)
-│   ├── login.html              ← Clean minimal sign-in screen
-│   ├── dashboard.html          ← Fleet overview & simulated telemetry
-│   ├── devices.html            ← Device management, modal forms & scanner
-│   └── admin.html              ← User management & access control
-│
-└── static/
-    ├── css/
-    │   └── style.css           ← Dark minimal design system stylesheet
-    └── js/
-        └── script.js           ← Client-side simulated data & event handlers
+```powershell
+python -m flask --app device_monitoring_prototype.app init-db
+python -m flask --app device_monitoring_prototype.app create-admin
+python -m flask --app device_monitoring_prototype.app run
 ```
 
----
+Open **http://127.0.0.1:5000**. Do not run `device_monitoring_prototype\app.py` as a standalone script; use the package-based Flask command above so Python resolves the application imports correctly.
 
-## Application Pages
+## Current scope
 
-| # | Page | Route | Description & Access |
-|---|---|---|---|
-| 1 | **Login** | `/` | Distraction-free authentication screen with password toggle |
-| 2 | **Dashboard** | `/dashboard` | Metric counters, fleet table, dynamic resource utilization gauges |
-| 3 | **My Devices** | `/devices` | CRUD interface, hardware diagnostic simulation, search & sort |
-| 4 | **Admin Panel** | `/admin` | User management directory (Administrator role only) |
+- Accounts, hashed passwords, sessions, role checks, device ownership, hardware/network snapshots, diagnostics history, and activity logs are database-backed.
+- API writes use CSRF validation; administrator and device-owner access checks run on the server.
+- Collection currently describes the machine running Flask. Remote device monitoring and real diagnostic execution require an authenticated endpoint agent and are not implemented.
 
----
-
-## Tech Stack
-
-- **Backend**: Python 3, Flask
-- **Frontend**: HTML5, CSS3 Custom Properties, Bootstrap 5.3
-- **Icons**: Bootstrap Icons
-- **State & Simulation**: Vanilla ES6 JavaScript, HTML5 `localStorage`
-
----
-
-## Stopping the Server
-
-Press `Ctrl + C` in your terminal window, then deactivate the environment:
-
-```bash
-deactivate
-```
+See [`device_monitoring_prototype/README.md`](device_monitoring_prototype/README.md) for additional setup notes, [`device_monitoring_prototype/DATABASE_DESIGN.md`](device_monitoring_prototype/DATABASE_DESIGN.md) for schema details, and [`device_monitoring_prototype/QUALITY_ASSURANCE_REPORT.md`](device_monitoring_prototype/QUALITY_ASSURANCE_REPORT.md) for the QA scope and verification status.

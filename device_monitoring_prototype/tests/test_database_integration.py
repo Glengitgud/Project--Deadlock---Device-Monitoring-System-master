@@ -4,8 +4,8 @@ from unittest.mock import patch
 from werkzeug.security import check_password_hash
 from werkzeug.security import generate_password_hash
 
-from device_monitoring_prototype.python.app import create_app
-from device_monitoring_prototype.python.models import (
+from device_monitoring_prototype.app import create_app
+from device_monitoring_prototype.models import (
     Device,
     DiagnosticRun,
     NetworkRecord,
@@ -84,6 +84,10 @@ class DatabaseIntegrationTest(unittest.TestCase):
         with self.client.session_transaction() as session:
             return session["_csrf_token"]
 
+    def test_login_and_registration_pages_render(self):
+        self.assertEqual(self.client.get("/").status_code, 200)
+        self.assertEqual(self.client.get("/register").status_code, 200)
+
     def test_registration_login_and_password_hash(self):
         self.register_and_login()
         self.assertEqual(self.client.get("/dashboard").status_code, 200)
@@ -108,10 +112,10 @@ class DatabaseIntegrationTest(unittest.TestCase):
             "connectivity_status": "connected",
         }
         with patch(
-            "device_monitoring_prototype.python.services.collect_hardware",
+            "device_monitoring_prototype.services.collect_hardware",
             return_value=hardware,
         ), patch(
-            "device_monitoring_prototype.python.services.collect_network",
+            "device_monitoring_prototype.services.collect_network",
             return_value=network,
         ):
             response = self.client.post(

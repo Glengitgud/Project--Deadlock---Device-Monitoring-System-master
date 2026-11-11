@@ -29,14 +29,14 @@ from flask_login import (
 from sqlalchemy import func
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .models import (
+from device_monitoring_prototype.models import (
     Device,
     Permission,
     Role,
     User,
     db,
 )
-from .services import (
+from device_monitoring_prototype.services import (
     ValidationError,
     archive_device,
     create_device,
@@ -66,7 +66,7 @@ def _database_uri():
 
 
 def create_app(test_config=None):
-    project_dir = Path(__file__).resolve().parent.parent
+    project_dir = Path(__file__).resolve().parent
     app = Flask(
         __name__,
         template_folder=str(project_dir / "templates"),
