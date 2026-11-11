@@ -1,45 +1,59 @@
-# DevMonitor
+# DevMonitor — Centralized Device Monitoring & Diagnostic System
 
-DevMonitor is a Flask application for centralized end-user device inventory and diagnostics. It uses Flask-Login sessions, Werkzeug password hashes, Flask-SQLAlchemy, and MySQL 8 for persistent account, device, hardware, network, diagnostic, and audit records.
+DevMonitor is a production-ready application for centralized end-user device inventory, real-time telemetry streaming, diagnostic inspections, and fleet administration. Built with Flask, SQLAlchemy, MySQL, Bootstrap 5, and vanilla JavaScript.
 
-## Setup on Windows
+## Quick Start on Windows
 
-1. Create a MySQL 8 database and application user. Copy `.env.example` to `.env`, then set the MySQL credentials and a long random `SECRET_KEY`. Keep `.env` private.
-2. From this directory, create and activate a Python 3.12 environment and install the dependencies:
+1. Copy `.env.example` to `.env` and set MySQL credentials or leave blank to use the SQLite development database.
+2. Create and activate a Python 3.12+ environment and install dependencies:
    ```powershell
-   py -3.12 -m venv .venv
+   python -m venv .venv
    .\.venv\Scripts\Activate.ps1
    pip install -r requirements.txt
    ```
-3. If you already created the earlier DevMonitor schema, back up the database, assign an owner to any existing ownerless devices, and run `migrations\001_database_integration.sql` once. For a new empty database, execute `schema.sql` in MySQL Workbench.
-4. Initialize RBAC roles, create the first administrator, and launch Flask:
+3. Initialize the database and launch the application:
    ```powershell
    flask --app python.app init-db
    flask --app python.app create-admin
-   flask --app python.app run
+   python app.py
    ```
-5. Open **http://127.0.0.1:5000**. Public registration creates standard-user accounts only.
+4. Open **http://127.0.0.1:5000** in your web browser.
 
-The app also accepts a `DATABASE_URL`, for example:
-`mysql+pymysql://devmonitor_app:password@127.0.0.1:3306/devmonitor?charset=utf8mb4`.
-Set `COOKIE_SECURE=true` when using HTTPS. The generated fallback session key is only suitable for local development; set a persistent `SECRET_KEY` for normal use.
+---
 
-## Features
+## Production Deployment with Docker
 
-- Account registration/login stores only Werkzeug password hashes and uses Flask-Login.
-- RBAC roles are seeded by `init-db`; creating an administrator requires the CLI or another administrator.
-- Device list and CRUD are owner-scoped; administrators can view/manage all accounts and devices.
-- Device registration saves a hardware specification and network snapshot; diagnostic actions save history entries. Deactivation and device removal are soft operations so historical records remain.
-- API write requests use a session CSRF token.
+Run the multi-container stack (Flask + Gunicorn, MySQL 8, and Nginx reverse proxy):
 
-**Collection limitation:** the current collector records information about the computer running Flask, not an arbitrary remote device entered in the form. Remote hardware, network, and real diagnostic collection requires an installed, authenticated endpoint agent; those monitoring checks are not implemented here.
+```bash
+docker compose up -d --build
+```
 
-## Files
+Access the system at **http://localhost**.
 
-- `python\app.py` — Flask application, authentication, views, JSON CRUD endpoints, and CLI commands.
-- `python\models.py` — SQLAlchemy tables and relationships.
-- `python\services.py` — validated CRUD functions and history persistence.
-- `python\system_info.py` — best-effort local host inventory.
-- `schema.sql` — complete MySQL schema for new installations.
-- `migrations\001_database_integration.sql` — one-time schema upgrade from the earlier design.
-- `DATABASE_DESIGN.md` — ERD summary, tables, relationships, and example SQL queries.
+---
+
+## Endpoint Telemetry Agent
+
+To monitor remote client endpoints (Windows, Linux, macOS), run the lightweight agent:
+
+```bash
+# 1. Register the device with central server
+python agent/devmonitor_agent.py --server http://127.0.0.1:5000 --register --username YOUR_USERNAME --password YOUR_PASSWORD --name "Office-PC-01"
+
+# 2. Start streaming real-time telemetry
+python agent/devmonitor_agent.py --server http://127.0.0.1:5000 --token YOUR_DEVICE_TOKEN --interval 5
+
+# 3. Execute real diagnostic inspection
+python agent/devmonitor_agent.py --server http://127.0.0.1:5000 --token YOUR_DEVICE_TOKEN --diagnose
+```
+
+---
+
+## Core System Capabilities
+
+- **Account Security & MFA:** RFC 6238 TOTP two-factor authentication, timed self-service password reset, 5-attempt brute-force lockout, and rate limiting.
+- **Real-Time Telemetry (SSE):** Server-Sent Events push live CPU, RAM, disk, and network metrics to dashboard gauges and time-series charts without page reloads.
+- **Automated Alerts:** Threshold-based triggers (CPU > 85%, Storage > 90%) dispatch notifications to the in-app navbar notification center.
+- **Exportable Reporting:** One-click CSV exports for device fleet inventories and compliance audit trails.
+- **Audit Logging:** Full audit coverage for all authentication (login, logout, lockout, reset) and administrative changes with an interactive Admin Panel viewer.

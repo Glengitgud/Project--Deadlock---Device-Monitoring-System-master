@@ -29,17 +29,18 @@ The prototype implements a **dark minimal aesthetic** tailored for operations da
 
 ```bash
 # 1. Navigate to the project folder
-cd C:\Users\ehrta\Downloads\Deadlock\device_monitoring_prototype
+cd device_monitoring_prototype
 
 # 2. Create and activate a virtual environment
-python -m venv venv
-venv\Scripts\activate        # Command Prompt
-# venv\Scripts\Activate.ps1  # PowerShell
+python -m venv .venv
+.venv\Scripts\activate        # Command Prompt
+# .venv\Scripts\Activate.ps1  # PowerShell
 
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Run the application
+# 4. Initialize database and run the application
+flask --app python.app init-db
 python app.py
 ```
 
