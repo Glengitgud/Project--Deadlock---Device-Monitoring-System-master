@@ -658,6 +658,19 @@ def create_app(test_config=None):
             ],
         )
 
+    @app.get("/api/health")
+    def health_check():
+        db_status = "ok"
+        try:
+            db.session.execute(func.now())
+        except Exception as exc:
+            db_status = f"unhealthy: {exc}"
+        return jsonify(
+            status="healthy" if db_status == "ok" else "degraded",
+            database=db_status,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+
     # ------------------------------------------------------------------
     # Real-Time Telemetry & Endpoint Agent Endpoints
     # ------------------------------------------------------------------
