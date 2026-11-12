@@ -11,6 +11,8 @@ let deviceSearch = '';
 let userSearch = '';
 let deviceSort = 'name-asc';
 let userSort = 'name-asc';
+const deviceAddresses = new Map();
+const deviceAddressRequests = new Map();
 
 function csrfToken() {
     return document.querySelector('meta[name="csrf-token"]')?.content || '';
@@ -108,42 +110,93 @@ function sortRows(rows, key, nameKey, statusKey = 'status') {
 
 async function refreshDevices() {
     devices = await api('/api/devices');
-    renderDevicesTable();
+    deviceAddresses.clear();
+    renderDevicesCards();
 }
 
-function renderDevicesTable() {
-    const body = document.getElementById('devicesTableBody');
-    if (!body) return;
+function renderDevicesCards() {
+    const grid = document.getElementById('devicesCardGrid');
+    if (!grid) return;
     let rows = devices.filter(device => device.name.toLowerCase().includes(deviceSearch));
     rows = sortRows(rows, deviceSort, 'name');
     const start = (devicePage - 1) * ITEMS_PER_PAGE;
     const pageRows = rows.slice(start, start + ITEMS_PER_PAGE);
-    body.innerHTML = pageRows.length ? pageRows.map(device => `
-        <tr>
-            <td class="fw-semibold">${escapeHTML(device.name)}</td>
-            <td>${escapeHTML(device.type)}</td>
-            <td>${escapeHTML(device.os)}</td>
-            <td>${escapeHTML(device.cpu)}</td>
-            <td>${escapeHTML(device.ram)}</td>
-            <td>${escapeHTML(device.storage)}</td>
-            <td><span class="${device.status === 'Online' ? 'badge-online' : 'badge-offline'}">
-                ${escapeHTML(device.status)}</span></td>
-            <td>${escapeHTML(device.lastUpdated ? new Date(device.lastUpdated).toLocaleDateString() : '')}</td>
-            <td><div class="action-btn-group">
-                <button class="btn btn-sm btn-outline-info" title="View"
+    grid.innerHTML = pageRows.length ? pageRows.map(device => `
+        <article class="device-card">
+            <div class="device-card-header">
+                <div class="device-card-icon" aria-hidden="true"><i class="bi bi-laptop"></i></div>
+                <span class="${device.status === 'Online' ? 'badge-online' : 'badge-offline'}">
+                    ${escapeHTML(device.status)}
+                </span>
+            </div>
+            <h3 class="device-card-title">${escapeHTML(device.name)}</h3>
+            <p class="device-card-subtitle">${escapeHTML(device.type)}</p>
+            <div class="device-card-details">
+                <div class="device-card-detail">
+                    <span class="device-card-label">IP Address</span>
+                    <span class="device-card-value" data-device-address="${device.id}">
+                        ${escapeHTML(deviceAddresses.get(device.id) || 'Loading...')}
+                    </span>
+                </div>
+                <div class="device-card-detail">
+                    <span class="device-card-label">Operating System</span>
+                    <span class="device-card-value">${escapeHTML(device.os || 'Not reported')}</span>
+                </div>
+                <div class="device-card-detail">
+                    <span class="device-card-label">Processor</span>
+                    <span class="device-card-value">${escapeHTML(device.cpu || 'Not reported')}</span>
+                </div>
+                <div class="device-card-detail">
+                    <span class="device-card-label">RAM</span>
+                    <span class="device-card-value">${escapeHTML(device.ram || 'Not reported')}</span>
+                </div>
+                <div class="device-card-detail">
+                    <span class="device-card-label">Storage</span>
+                    <span class="device-card-value">${escapeHTML(device.storage || 'Not reported')}</span>
+                </div>
+                <div class="device-card-detail">
+                    <span class="device-card-label">Last Updated</span>
+                    <span class="device-card-value">
+                        ${escapeHTML(device.lastUpdated ? new Date(device.lastUpdated).toLocaleDateString() : 'Not available')}
+                    </span>
+                </div>
+            </div>
+            <div class="device-card-actions">
+                <button class="btn btn-sm btn-outline-info" title="View" aria-label="View device"
                     onclick="openDeviceModal('view', ${device.id})"><i class="bi bi-eye"></i></button>
-                <button class="btn btn-sm btn-outline-primary" title="Edit"
+                <button class="btn btn-sm btn-outline-primary" title="Edit" aria-label="Edit device"
                     onclick="openDeviceModal('edit', ${device.id})"><i class="bi bi-pencil"></i></button>
                 <button class="btn btn-sm btn-outline-success" title="Record diagnostic entry"
+                    aria-label="Record diagnostic entry"
                     onclick="scanDevice(${device.id})"><i class="bi bi-search"></i></button>
-                <button class="btn btn-sm btn-outline-danger" title="Archive"
+                <button class="btn btn-sm btn-outline-danger" title="Archive" aria-label="Archive device"
                     onclick="confirmDeleteDevice(${device.id})"><i class="bi bi-archive"></i></button>
-            </div></td>
-        </tr>`).join('') : '<tr><td colspan="9" class="text-center text-muted py-4">No devices found.</td></tr>';
+            </div>
+        </article>`).join('') : '<div class="device-card-empty">No devices found.</div>';
     renderPagination('devicesPagination', rows.length, devicePage, page => {
         devicePage = page;
-        renderDevicesTable();
+        renderDevicesCards();
     });
+
+    pageRows.forEach(device => loadDeviceAddress(device));
+}
+
+function loadDeviceAddress(device) {
+    if (deviceAddresses.has(device.id) || deviceAddressRequests.has(device.id)) return;
+    const request = api(`/api/devices/${device.id}/history`)
+        .then(history => {
+            const latestAddress = history.network?.find(record => record.ip_address)?.ip_address;
+            deviceAddresses.set(device.id, latestAddress || 'Not reported');
+        })
+        .catch(error => {
+            deviceAddresses.set(device.id, 'Unavailable');
+            showToast(`Could not load the IP address for ${device.name}: ${error.message}`, 'danger');
+        })
+        .finally(() => {
+            deviceAddressRequests.delete(device.id);
+            renderDevicesCards();
+        });
+    deviceAddressRequests.set(device.id, request);
 }
 
 function initDevicesPage() {
@@ -151,11 +204,11 @@ function initDevicesPage() {
     document.getElementById('deviceSearchInput')?.addEventListener('input', event => {
         deviceSearch = event.target.value.trim().toLowerCase();
         devicePage = 1;
-        renderDevicesTable();
+        renderDevicesCards();
     });
     document.getElementById('deviceSortSelect')?.addEventListener('change', event => {
         deviceSort = event.target.value;
-        renderDevicesTable();
+        renderDevicesCards();
     });
 }
 

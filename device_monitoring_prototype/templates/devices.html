@@ -46,31 +46,14 @@
     </div>
 </div>
 
-<!-- ---- Devices Table ---- -->
+<!-- ---- Device Cards ---- -->
 <div class="content-card mb-4">
     <div class="content-card-header">
         <h6 class="mb-0"><i class="bi bi-laptop me-2"></i>Registered Devices</h6>
     </div>
     <div class="content-card-body">
-        <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0">
-                <thead>
-                    <tr>
-                        <th>Device Name</th>
-                        <th>Type</th>
-                        <th>OS</th>
-                        <th>CPU</th>
-                        <th>RAM</th>
-                        <th>Storage</th>
-                        <th>Status</th>
-                        <th>Last Updated</th>
-                        <th class="text-center">Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="devicesTableBody">
-                    <!-- Populated by JavaScript -->
-                </tbody>
-            </table>
+        <div class="device-card-grid" id="devicesCardGrid" aria-live="polite">
+            <!-- Populated by JavaScript -->
         </div>
         <!-- Pagination -->
         <nav class="mt-3">
