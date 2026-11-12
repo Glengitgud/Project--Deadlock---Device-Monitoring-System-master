@@ -769,6 +769,64 @@ code {
     text-align: center;
 }
 
+.device-information-section + .device-information-section {
+    margin-top: 1.25rem;
+}
+
+.device-information-heading {
+    margin: 0 0 0.75rem;
+    color: #ffffff;
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.device-information-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+    gap: 0.75rem;
+}
+
+.device-information-card {
+    min-width: 0;
+    padding: 1rem;
+    background: var(--dm-surface);
+    border: 1px solid var(--dm-border);
+    border-radius: var(--radius-md);
+    color: var(--dm-text);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.device-information-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255, 255, 255, 0.16);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.device-information-label {
+    display: block;
+    margin-bottom: 0.25rem;
+    color: var(--dm-text-muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.045em;
+    text-transform: uppercase;
+}
+
+.device-information-value {
+    display: block;
+    color: var(--dm-text);
+    font-size: 0.88rem;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.device-information-empty {
+    padding: 1rem;
+    color: var(--dm-text-muted);
+    text-align: center;
+}
+
 @media (max-width: 575.98px) {
     .device-card {
         padding: 1.1rem;

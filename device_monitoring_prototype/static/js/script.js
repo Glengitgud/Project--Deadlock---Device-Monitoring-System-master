@@ -7,6 +7,7 @@ let selectedDeviceId = null;
 let selectedUserId = null;
 let devicePage = 1;
 let userPage = 1;
+let deviceDetailsRequestId = 0;
 let deviceSearch = '';
 let userSearch = '';
 let deviceSort = 'name-asc';
@@ -212,11 +213,18 @@ function initDevicesPage() {
     });
 }
 
-function openDeviceModal(mode, deviceId) {
+async function openDeviceModal(mode, deviceId) {
     const device = devices.find(item => item.id === deviceId);
+    const requestId = ++deviceDetailsRequestId;
     selectedDeviceId = deviceId || null;
     const form = document.getElementById('deviceForm');
     form.reset();
+    const detailsView = document.getElementById('deviceDetailsView');
+    detailsView.classList.toggle('d-none', mode !== 'view');
+    detailsView.innerHTML = mode === 'view'
+        ? '<div class="device-information-empty">Loading device information...</div>'
+        : '';
+    form.classList.toggle('d-none', mode === 'view');
     document.getElementById('deviceFormMode').value = mode;
     document.getElementById('deviceFormId').value = deviceId || '';
     document.getElementById('deviceFormOwner').value =
@@ -242,7 +250,116 @@ function openDeviceModal(mode, deviceId) {
     document.getElementById('saveDeviceBtn').classList.toggle('d-none', readOnly);
     document.getElementById('deviceModalFooter').querySelector('.btn-secondary').textContent =
         readOnly ? 'Close' : 'Cancel';
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('deviceModal')).show();
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('deviceModal'));
+    modal.show();
+    if (mode === 'view') {
+        try {
+            const details = await api(`/api/devices/${deviceId}`);
+            if (requestId !== deviceDetailsRequestId || selectedDeviceId !== deviceId) return;
+            detailsView.innerHTML = renderDeviceDetails(details);
+        } catch (error) {
+            if (requestId !== deviceDetailsRequestId) return;
+            detailsView.innerHTML = `<div class="alert alert-danger mb-0" role="alert">
+                ${escapeHTML(error.message)}
+            </div>`;
+        }
+    }
+}
+
+function renderDeviceDetails(device) {
+    const value = item => item == null || item === '' ? 'Not available' : String(item);
+    const card = (label, item) => `
+        <div class="device-information-card">
+            <span class="device-information-label">${escapeHTML(label)}</span>
+            <span class="device-information-value">${escapeHTML(value(item))}</span>
+        </div>`;
+    const section = (title, items) => `
+        <section class="device-information-section">
+            <h6 class="device-information-heading">${escapeHTML(title)}</h6>
+            <div class="device-information-grid">${items.map(([label, item]) => card(label, item)).join('')}</div>
+        </section>`;
+    const owner = device.owner || {};
+    const registrant = device.registered_by || {};
+    const specification = device.specification || {};
+    const sections = [
+        section('Device', [
+            ['Device ID', device.id], ['Asset Tag', device.asset_tag],
+            ['Device Name', device.device_name], ['Hostname', device.hostname],
+            ['Type', device.device_type], ['Status', device.status],
+            ['Serial Number', device.serial_number], ['Manufacturer', device.manufacturer],
+            ['Model', device.model], ['Operating System', device.operating_system],
+            ['OS Version', device.operating_system_version],
+        ]),
+        section('Ownership and Dates', [
+            ['Owner', owner.full_name], ['Owner Username', owner.username],
+            ['Owner Email', owner.email], ['Registered By', registrant.full_name],
+            ['Registered By Username', registrant.username],
+            ['Registered At', device.registered_at], ['Updated At', device.updated_at],
+            ['Last Seen At', device.last_seen_at],
+        ]),
+        section('Hardware Specification', [
+            ['CPU', specification.cpu_model], ['CPU Cores', specification.cpu_cores],
+            ['CPU Threads', specification.cpu_threads], ['Memory (bytes)', specification.memory_bytes],
+            ['Storage (bytes)', specification.storage_bytes], ['GPU', specification.gpu_model],
+            ['BIOS Version', specification.bios_version],
+            ['Motherboard', specification.motherboard_model],
+            ['Specification OS Version', specification.operating_system_version],
+            ['Collected At', specification.collected_at],
+        ]),
+        section('Network Records', (device.network_records || []).flatMap(record => [
+            ['IP Address', record.ip_address], ['Subnet Mask', record.subnet_mask],
+            ['Default Gateway', record.default_gateway], ['DNS Server', record.dns_server],
+            ['Connectivity', record.connectivity_status], ['Recorded At', record.recorded_at],
+        ])),
+        section('Network Interfaces', (device.network_interfaces || []).flatMap(networkInterface => [
+            ['Interface', networkInterface.interface_name], ['MAC Address', networkInterface.mac_address],
+            ['Interface Type', networkInterface.interface_type],
+            ['Primary', networkInterface.is_primary ? 'Yes' : 'No'],
+            ...networkInterface.observations.flatMap(observation => [
+                ['Observed IP Address', observation.ip_address],
+                ['Subnet Prefix', observation.subnet_prefix], ['Gateway', observation.gateway],
+                ['DNS Servers', JSON.stringify(observation.dns_servers)],
+                ['SSID', observation.ssid], ['Connection Type', observation.connection_type],
+                ['Observed At', observation.observed_at],
+            ]),
+        ])),
+        section('Diagnostic History', (device.diagnostics || []).flatMap(run => [
+            ['Diagnostic Status', run.status], ['Summary', run.summary],
+            ['Detected Problem', run.detected_problem], ['Recommendation', run.recommendation],
+            ['Started At', run.started_at], ['Finished At', run.finished_at],
+            ...run.checks.flatMap(check => [
+                ['Check', check.check_name], ['Category', check.category],
+                ['Check Status', check.status], ['Result', check.result_summary],
+                ['Details', JSON.stringify(check.details)], ['Measured At', check.measured_at],
+            ]),
+        ])),
+        section('Monitoring Metrics', (device.metrics || []).flatMap(metric => [
+            ['CPU Usage (%)', metric.cpu_percent], ['Memory Usage (%)', metric.memory_percent],
+            ['Storage Usage (%)', metric.storage_percent],
+            ['Memory Used (bytes)', metric.memory_used_bytes],
+            ['Storage Used (bytes)', metric.storage_used_bytes],
+            ['Network Received (bytes)', metric.network_rx_bytes],
+            ['Network Sent (bytes)', metric.network_tx_bytes],
+            ['Collected At', metric.collected_at],
+        ])),
+        section('System Logs', (device.logs || []).flatMap(log => [
+            ['Event', log.event], ['Timestamp', log.timestamp],
+        ])),
+    ];
+    return sections.map((content, index) => {
+        const hasData = [
+            device.network_records, device.network_interfaces, device.diagnostics,
+            device.metrics, device.logs,
+        ][index - 3];
+        if (index >= 3 && (!hasData || !hasData.length)) {
+            const headings = [
+                'Network Records', 'Network Interfaces', 'Diagnostic History',
+                'Monitoring Metrics', 'System Logs',
+            ];
+            return section(headings[index - 3], [['Information', 'No records available']]);
+        }
+        return content;
+    }).join('');
 }
 
 async function saveDevice() {

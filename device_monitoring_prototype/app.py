@@ -324,6 +324,150 @@ def create_app(test_config=None):
             return api_error(error)
         return jsonify(serialize_device(device))
 
+    @app.get("/api/devices/<int:device_id>")
+    @login_required
+    def device_details(device_id):
+        device = db.get_or_404(Device, device_id)
+        can_manage_device(device)
+        return jsonify(
+            id=device.id,
+            asset_tag=device.asset_tag,
+            device_name=device.device_name,
+            hostname=device.hostname,
+            device_type=device.device_type,
+            serial_number=device.serial_number,
+            manufacturer=device.manufacturer,
+            model=device.model,
+            operating_system=device.operating_system,
+            operating_system_version=device.operating_system_version,
+            status=device.status,
+            owner={
+                "id": device.owner.id,
+                "username": device.owner.username,
+                "full_name": device.owner.full_name,
+                "email": device.owner.email,
+            },
+            registered_by={
+                "id": device.registered_by.id,
+                "username": device.registered_by.username,
+                "full_name": device.registered_by.full_name,
+            } if device.registered_by else None,
+            registered_at=device.registered_at.isoformat() if device.registered_at else None,
+            updated_at=device.updated_at.isoformat() if device.updated_at else None,
+            last_seen_at=device.last_seen_at.isoformat() if device.last_seen_at else None,
+            specification={
+                "cpu_model": device.hardware_spec.cpu_model,
+                "cpu_cores": device.hardware_spec.cpu_cores,
+                "cpu_threads": device.hardware_spec.cpu_threads,
+                "memory_bytes": device.hardware_spec.memory_bytes,
+                "storage_bytes": device.hardware_spec.storage_bytes,
+                "gpu_model": device.hardware_spec.gpu_model,
+                "bios_version": device.hardware_spec.bios_version,
+                "motherboard_model": device.hardware_spec.motherboard_model,
+                "operating_system_version": device.hardware_spec.operating_system_version,
+                "collected_at": (
+                    device.hardware_spec.collected_at.isoformat()
+                    if device.hardware_spec.collected_at else None
+                ),
+            } if device.hardware_spec else None,
+            network_records=[
+                {
+                    "ip_address": record.ip_address,
+                    "subnet_mask": record.subnet_mask,
+                    "default_gateway": record.default_gateway,
+                    "dns_server": record.dns_server,
+                    "connectivity_status": record.connectivity_status,
+                    "recorded_at": record.recorded_at.isoformat(),
+                }
+                for record in sorted(
+                    device.network_records,
+                    key=lambda item: item.recorded_at,
+                    reverse=True,
+                )
+            ],
+            network_interfaces=[
+                {
+                    "interface_name": interface.interface_name,
+                    "mac_address": interface.mac_address,
+                    "interface_type": interface.interface_type,
+                    "is_primary": interface.is_primary,
+                    "observations": [
+                        {
+                            "ip_address": observation.ip_address,
+                            "subnet_prefix": observation.subnet_prefix,
+                            "gateway": observation.gateway,
+                            "dns_servers": observation.dns_servers,
+                            "ssid": observation.ssid,
+                            "connection_type": observation.connection_type,
+                            "observed_at": observation.observed_at.isoformat(),
+                        }
+                        for observation in sorted(
+                            interface.observations,
+                            key=lambda item: item.observed_at,
+                            reverse=True,
+                        )
+                    ],
+                }
+                for interface in device.network_interfaces
+            ],
+            diagnostics=[
+                {
+                    "id": run.id,
+                    "status": run.status,
+                    "summary": run.summary,
+                    "detected_problem": run.detected_problem,
+                    "recommendation": run.recommendation,
+                    "started_at": run.started_at.isoformat(),
+                    "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                    "checks": [
+                        {
+                            "check_name": check.check_name,
+                            "category": check.category,
+                            "status": check.status,
+                            "result_summary": check.result_summary,
+                            "details": check.details,
+                            "measured_at": check.measured_at.isoformat(),
+                        }
+                        for check in run.checks
+                    ],
+                }
+                for run in sorted(
+                    device.diagnostic_runs,
+                    key=lambda item: item.started_at,
+                    reverse=True,
+                )
+            ],
+            metrics=[
+                {
+                    "cpu_percent": metric.cpu_percent,
+                    "memory_percent": metric.memory_percent,
+                    "storage_percent": metric.storage_percent,
+                    "memory_used_bytes": metric.memory_used_bytes,
+                    "storage_used_bytes": metric.storage_used_bytes,
+                    "network_rx_bytes": metric.network_rx_bytes,
+                    "network_tx_bytes": metric.network_tx_bytes,
+                    "collected_at": metric.collected_at.isoformat(),
+                }
+                for metric in sorted(
+                    device.metric_samples,
+                    key=lambda item: item.collected_at,
+                    reverse=True,
+                )
+            ],
+            logs=[
+                {
+                    "id": entry.id,
+                    "event": entry.event,
+                    "timestamp": entry.timestamp.isoformat(),
+                }
+                for entry in sorted(
+                    device.logs,
+                    key=lambda item: item.timestamp,
+                    reverse=True,
+                )
+            ],
+        )
+
     @app.delete("/api/devices/<int:device_id>")
     @login_required
     def delete_device(device_id):
