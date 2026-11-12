@@ -89,6 +89,8 @@ def create_user(data, *, role_name="User"):
         raise ValidationError("Password must be between 12 and 1024 characters.")
     if not re.fullmatch(r"[A-Za-z0-9_.-]{3,64}", username):
         raise ValidationError("Username must be 3-64 letters, numbers, dots, dashes, or underscores.")
+    if username.casefold() == "admin":
+        raise ValidationError("The username 'admin' is reserved for the system Administrator.")
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
         raise ValidationError("Enter a valid email address.")
     if User.query.filter(or_(User.username == username, User.email == email)).first():
@@ -114,6 +116,8 @@ def create_user(data, *, role_name="User"):
 
 
 def update_user(user, data):
+    if user.username.casefold() == "admin":
+        raise ValidationError("The system Administrator account cannot be changed here.")
     if "full_name" in data:
         user.full_name = _required_text(data, "full_name", limit=120)
     if "email" in data:
@@ -159,6 +163,8 @@ def update_user(user, data):
 
 
 def deactivate_user(user):
+    if user.username.casefold() == "admin":
+        raise ValidationError("The system Administrator account cannot be deactivated.")
     active_admins = (
         User.query.join(User.roles)
         .filter(Role.name == "Administrator", User.status == "active")
@@ -219,7 +225,7 @@ def update_device(device, data):
     if "status" in data:
         status = data["status"]
         if not isinstance(status, str) or status.lower() not in {
-            "online", "offline", "maintenance", "unknown", "retired"
+            "online", "offline", "maintenance", "unknown"
         }:
             raise ValidationError("Invalid device status.")
         device.status = status.lower()
@@ -230,9 +236,40 @@ def update_device(device, data):
 
 
 def archive_device(device):
-    device.status = "retired"
+    if device.lifecycle_status != "active":
+        raise ValidationError("Only active devices can be archived.")
+    from flask_login import current_user
+
+    device.lifecycle_status = "archived"
+    device.archived_at = db.func.current_timestamp()
+    device.archived_by_user_id = (
+        current_user.id if current_user.is_authenticated else None
+    )
     _log_device_event(device, "Device archived")
     _log("device.archived", "device", device.id)
+    db.session.commit()
+
+
+def restore_device(device):
+    if device.lifecycle_status != "archived":
+        raise ValidationError("Only archived devices can be restored.")
+    device.lifecycle_status = "active"
+    device.archived_at = None
+    device.archived_by_user_id = None
+    if device.status == "retired":
+        device.status = "unknown"
+    _log_device_event(device, "Device restored")
+    _log("device.restored", "device", device.id)
+    db.session.commit()
+
+
+def soft_delete_device(device):
+    if device.lifecycle_status == "deleted":
+        raise ValidationError("This device is already deleted.")
+    device.lifecycle_status = "deleted"
+    device.deleted_at = db.func.current_timestamp()
+    _log_device_event(device, "Device marked deleted")
+    _log("device.deleted", "device", device.id)
     db.session.commit()
 
 

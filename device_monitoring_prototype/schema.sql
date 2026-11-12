@@ -45,6 +45,10 @@ CREATE TABLE devices (
     operating_system VARCHAR(120) NULL,
     operating_system_version VARCHAR(120) NULL,
     status VARCHAR(16) NOT NULL DEFAULT 'unknown',
+    lifecycle_status VARCHAR(16) NOT NULL DEFAULT 'active',
+    archived_at DATETIME NULL,
+    archived_by_user_id BIGINT NULL,
+    deleted_at DATETIME NULL,
     owner_user_id BIGINT NOT NULL,
     registered_by_user_id BIGINT NULL,
     registered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -54,10 +58,16 @@ CREATE TABLE devices (
     UNIQUE KEY uq_devices_asset_tag (asset_tag),
     UNIQUE KEY uq_devices_serial_number (serial_number),
     KEY ix_devices_owner_status (owner_user_id, status),
+    KEY ix_devices_lifecycle_owner (lifecycle_status, owner_user_id),
     CONSTRAINT fk_devices_owner FOREIGN KEY (owner_user_id)
         REFERENCES users (id) ON DELETE RESTRICT,
     CONSTRAINT fk_devices_registered_by FOREIGN KEY (registered_by_user_id)
         REFERENCES users (id) ON DELETE SET NULL,
+    CONSTRAINT fk_devices_archived_by FOREIGN KEY (archived_by_user_id)
+        REFERENCES users (id) ON DELETE SET NULL,
+    CONSTRAINT ck_devices_lifecycle_status CHECK (
+        lifecycle_status IN ('active', 'archived', 'deleted')
+    ),
     CONSTRAINT ck_devices_status CHECK (
         status IN ('online', 'offline', 'maintenance', 'retired', 'unknown')
     )

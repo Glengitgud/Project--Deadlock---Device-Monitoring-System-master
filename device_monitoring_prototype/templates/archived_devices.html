@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Archived Devices - Device Monitoring System{% endblock %}
+{% block page_title %}Archived Devices{% endblock %}
+
+{% block content %}
+<div class="content-card mb-4">
+    <div class="content-card-header">
+        <h6 class="mb-0"><i class="bi bi-archive me-2"></i>Archived Devices</h6>
+    </div>
+    <div class="content-card-body">
+        <div class="row g-2 align-items-center mb-3">
+            <div class="col-md-6">
+                <label class="visually-hidden" for="archivedDeviceSearch">Search archived devices</label>
+                <input class="form-control" id="archivedDeviceSearch" type="search"
+                       placeholder="Search archived devices by name or type...">
+            </div>
+            <div class="col-md-6 text-md-end">
+                <a class="btn btn-outline-primary" href="{{ url_for('devices') }}">
+                    <i class="bi bi-arrow-left me-1"></i>Active Devices
+                </a>
+            </div>
+        </div>
+        <div class="device-card-grid" id="archivedDevicesCardGrid" aria-live="polite">
+            <div class="device-card-empty">Loading archived devices...</div>
+        </div>
+        <nav class="mt-3" aria-label="Archived device pages">
+            <ul class="pagination justify-content-center mb-0" id="archivedDevicesPagination"></ul>
+        </nav>
+    </div>
+</div>
+{% endblock %}

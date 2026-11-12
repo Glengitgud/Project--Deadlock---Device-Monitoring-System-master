@@ -9,14 +9,27 @@ let devicePage = 1;
 let userPage = 1;
 let deviceDetailsRequestId = 0;
 let deviceSearch = '';
+let archivedDeviceSearch = '';
+let archivedDevices = [];
 let userSearch = '';
 let deviceSort = 'name-asc';
 let userSort = 'name-asc';
+let archivedDevicePage = 1;
+const isAdministrator = document.body.dataset.isAdmin === 'true';
 const deviceAddresses = new Map();
 const deviceAddressRequests = new Map();
 
 function csrfToken() {
     return document.querySelector('meta[name="csrf-token"]')?.content || '';
+}
+
+function initArchivedDevicesPage() {
+    refreshArchivedDevices().catch(error => showToast(error.message, 'danger'));
+    document.getElementById('archivedDeviceSearch')?.addEventListener('input', event => {
+        archivedDeviceSearch = event.target.value.trim().toLowerCase();
+        archivedDevicePage = 1;
+        renderArchivedDevicesCards();
+    });
 }
 
 async function api(url, options = {}) {
@@ -72,6 +85,7 @@ function initSidebar() {
 
 function getCurrentPage() {
     const path = window.location.pathname;
+    if (path.includes('archived-devices')) return 'archived-devices';
     if (path.includes('dashboard')) return 'dashboard';
     if (path.includes('devices')) return 'devices';
     if (path.includes('admin')) return 'admin';
@@ -156,9 +170,9 @@ function renderDevicesCards() {
                     <span class="device-card-value">${escapeHTML(device.storage || 'Not reported')}</span>
                 </div>
                 <div class="device-card-detail">
-                    <span class="device-card-label">Last Updated</span>
+                    <span class="device-card-label">Date Registered</span>
                     <span class="device-card-value">
-                        ${escapeHTML(device.lastUpdated ? new Date(device.lastUpdated).toLocaleDateString() : 'Not available')}
+                        ${escapeHTML(device.registered ? new Date(device.registered).toLocaleDateString() : 'Not available')}
                     </span>
                 </div>
             </div>
@@ -172,6 +186,9 @@ function renderDevicesCards() {
                     onclick="scanDevice(${device.id})"><i class="bi bi-search"></i></button>
                 <button class="btn btn-sm btn-outline-danger" title="Archive" aria-label="Archive device"
                     onclick="confirmDeleteDevice(${device.id})"><i class="bi bi-archive"></i></button>
+                ${isAdministrator ? `<button class="btn btn-sm btn-outline-danger" title="Soft delete"
+                    aria-label="Soft delete device"
+                    onclick="softDeleteDevice(${device.id})"><i class="bi bi-trash"></i></button>` : ''}
             </div>
         </article>`).join('') : '<div class="device-card-empty">No devices found.</div>';
     renderPagination('devicesPagination', rows.length, devicePage, page => {
@@ -180,6 +197,54 @@ function renderDevicesCards() {
     });
 
     pageRows.forEach(device => loadDeviceAddress(device));
+}
+
+async function refreshArchivedDevices() {
+    archivedDevices = await api('/api/archived-devices');
+    renderArchivedDevicesCards();
+}
+
+function renderArchivedDevicesCards() {
+    const grid = document.getElementById('archivedDevicesCardGrid');
+    if (!grid) return;
+    const rows = archivedDevices.filter(device =>
+        `${device.name} ${device.type}`.toLowerCase().includes(archivedDeviceSearch)
+    );
+    const start = (archivedDevicePage - 1) * ITEMS_PER_PAGE;
+    const pageRows = rows.slice(start, start + ITEMS_PER_PAGE);
+    grid.innerHTML = pageRows.length ? pageRows.map(device => `
+        <article class="device-card">
+            <div class="device-card-header">
+                <div class="device-card-icon" aria-hidden="true"><i class="bi bi-laptop"></i></div>
+                <span class="badge-archived">Archived</span>
+            </div>
+            <h3 class="device-card-title">${escapeHTML(device.name)}</h3>
+            <p class="device-card-subtitle">${escapeHTML(device.type)}</p>
+            <div class="device-card-details">
+                <div class="device-card-detail">
+                    <span class="device-card-label">Operating System</span>
+                    <span class="device-card-value">${escapeHTML(device.os || 'Not reported')}</span>
+                </div>
+                <div class="device-card-detail">
+                    <span class="device-card-label">Archived On</span>
+                    <span class="device-card-value">${escapeHTML(device.archivedAt
+                        ? new Date(device.archivedAt).toLocaleString() : 'Not available')}</span>
+                </div>
+            </div>
+            <div class="device-card-actions">
+                <button class="btn btn-sm btn-outline-info" title="View" aria-label="View device"
+                    onclick="openDeviceModal('view', ${device.id})"><i class="bi bi-eye"></i></button>
+                <button class="btn btn-sm btn-outline-success" title="Restore" aria-label="Restore device"
+                    onclick="restoreArchivedDevice(${device.id})"><i class="bi bi-arrow-counterclockwise"></i></button>
+                ${isAdministrator ? `<button class="btn btn-sm btn-outline-danger" title="Soft delete"
+                    aria-label="Soft delete device"
+                    onclick="softDeleteDevice(${device.id})"><i class="bi bi-trash"></i></button>` : ''}
+            </div>
+        </article>`).join('') : '<div class="device-card-empty">No archived devices found.</div>';
+    renderPagination('archivedDevicesPagination', rows.length, archivedDevicePage, page => {
+        archivedDevicePage = page;
+        renderArchivedDevicesCards();
+    });
 }
 
 function loadDeviceAddress(device) {
@@ -284,6 +349,25 @@ function renderDeviceDetails(device) {
     const owner = device.owner || {};
     const registrant = device.registered_by || {};
     const specification = device.specification || {};
+    if (device.view_mode === 'user') {
+        return section('Device Information', [
+            ['Device Name', device.device_name],
+            ['Device Type', device.device_type],
+            ['Operating System', device.operating_system],
+            ['Device Status', device.status],
+            ['IP Address', device.ip_address],
+            ['Date Registered', device.registered_at],
+        ]) + section('Device Specifications', [
+            ['CPU', specification.cpu_model], ['CPU Cores', specification.cpu_cores],
+            ['CPU Threads', specification.cpu_threads],
+            ['Memory (bytes)', specification.memory_bytes],
+            ['Storage (bytes)', specification.storage_bytes],
+            ['GPU', specification.gpu_model],
+            ['BIOS Version', specification.bios_version],
+            ['Motherboard', specification.motherboard_model],
+            ['Operating System Version', specification.operating_system_version],
+        ]);
+    }
     const sections = [
         section('Device', [
             ['Device ID', device.id], ['Asset Tag', device.asset_tag],
@@ -291,6 +375,10 @@ function renderDeviceDetails(device) {
             ['Type', device.device_type], ['Status', device.status],
             ['Owner User ID', device.owner_user_id],
             ['Registered By User ID', device.registered_by_user_id],
+            ['Lifecycle', device.lifecycle_status],
+            ['Archived At', device.archived_at],
+            ['Archived By User ID', device.archived_by_user_id],
+            ['Deleted At', device.deleted_at],
             ['Serial Number', device.serial_number], ['Manufacturer', device.manufacturer],
             ['Model', device.model], ['Operating System', device.operating_system],
             ['OS Version', device.operating_system_version],
@@ -407,10 +495,37 @@ function confirmDeleteDevice(deviceId) {
 
 async function archiveSelectedDevice() {
     try {
-        await api(`/api/devices/${selectedDeviceId}`, { method: 'DELETE' });
+        await api(`/api/devices/${selectedDeviceId}/archive`, { method: 'POST' });
         bootstrap.Modal.getInstance(document.getElementById('deleteDeviceModal')).hide();
         await refreshDevices();
         showToast('Device archived; its history was retained.');
+    } catch (error) {
+        showToast(error.message, 'danger');
+    }
+}
+
+async function restoreArchivedDevice(deviceId) {
+    try {
+        await api(`/api/devices/${deviceId}/restore`, { method: 'POST' });
+        await refreshArchivedDevices();
+        showToast('Device restored to the active list.');
+    } catch (error) {
+        showToast(error.message, 'danger');
+    }
+}
+
+async function softDeleteDevice(deviceId) {
+    if (!isAdministrator || !window.confirm('Mark this device as deleted? Its records will be retained.')) {
+        return;
+    }
+    try {
+        await api(`/api/devices/${deviceId}`, { method: 'DELETE' });
+        if (getCurrentPage() === 'archived-devices') {
+            await refreshArchivedDevices();
+        } else {
+            await refreshDevices();
+        }
+        showToast('Device marked deleted; its database records were retained.');
     } catch (error) {
         showToast(error.message, 'danger');
     }
@@ -616,5 +731,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (page === 'dashboard') initDashboard();
     if (page === 'devices') initDevicesPage();
+    if (page === 'archived-devices') initArchivedDevicesPage();
     if (page === 'admin') initAdminPage();
 });

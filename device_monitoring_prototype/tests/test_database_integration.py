@@ -133,7 +133,7 @@ class DatabaseIntegrationTest(unittest.TestCase):
         self.assertEqual(first_result.exit_code, 0, first_result.output)
         second_result = runner.invoke(args=["init-db"])
         self.assertEqual(second_result.exit_code, 0, second_result.output)
-        self.assertIn("already exists", second_result.output)
+        self.assertIn("active and ready", second_result.output)
 
         with self.app.app_context():
             administrator = User.query.filter_by(username="admin").one()
@@ -141,6 +141,30 @@ class DatabaseIntegrationTest(unittest.TestCase):
             self.assertTrue(administrator.is_active)
             self.assertTrue(check_password_hash(administrator.password_hash, "admin123"))
             self.assertEqual(User.query.filter_by(username="admin").count(), 1)
+
+        response = self.client.post(
+            "/register",
+            data={
+                "full_name": "Duplicate Administrator",
+                "email": "duplicate-admin@example.com",
+                "username": "Admin",
+                "password": "valid-registration-password",
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+        with self.app.app_context():
+            administrator = User.query.filter_by(username="admin").one()
+            administrator.status = "inactive"
+            administrator.password_hash = generate_password_hash("old-admin-password")
+            administrator.roles.clear()
+            db.session.commit()
+        repair_result = runner.invoke(args=["init-db"])
+        self.assertEqual(repair_result.exit_code, 0, repair_result.output)
+        with self.app.app_context():
+            administrator = User.query.filter_by(username="admin").one()
+            self.assertTrue(administrator.is_admin)
+            self.assertTrue(administrator.is_active)
+            self.assertTrue(check_password_hash(administrator.password_hash, "admin123"))
 
         self.client.get("/login")
         with self.client.session_transaction() as session:
@@ -151,12 +175,28 @@ class DatabaseIntegrationTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.client.get("/admin").status_code, 200)
+        self.assertNotIn(
+            "admin",
+            {user["username"] for user in self.client.get("/api/users").json},
+        )
+        with self.app.app_context():
+            admin_id = User.query.filter_by(username="admin").one().id
+        self.client.get("/dashboard")
+        with self.client.session_transaction() as session:
+            token = session["_csrf_token"]
+        protected_admin = self.client.patch(
+            f"/api/users/{admin_id}",
+            headers={"X-CSRF-Token": token},
+            json={"status": "inactive", "role": "User"},
+        )
+        self.assertEqual(protected_admin.status_code, 400)
 
     def test_all_standard_user_pages_and_apis_render(self):
         self.register_and_login()
         for path in ("/dashboard", "/devices", "/api/dashboard", "/api/devices"):
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 200)
+        self.assertEqual(self.client.get("/archived-devices").status_code, 200)
         static_response = self.client.get("/static/css/style.css")
         self.assertEqual(static_response.status_code, 200)
         static_response.close()
@@ -327,26 +367,32 @@ class DatabaseIntegrationTest(unittest.TestCase):
         self.assertEqual(len(history.json["logs"]), 2)
         details = self.client.get(f"/api/devices/{device_id}")
         self.assertEqual(details.status_code, 200, details.get_data(as_text=True))
+        self.assertEqual(details.json["view_mode"], "user")
         self.assertEqual(details.json["device_name"], "Test Laptop")
-        self.assertEqual(details.json["hostname"], "test-laptop")
-        self.assertEqual(details.json["owner"]["username"], "testuser")
+        self.assertEqual(details.json["ip_address"], "192.0.2.10")
+        self.assertEqual(
+            set(details.json),
+            {
+                "view_mode",
+                "device_name",
+                "device_type",
+                "operating_system",
+                "status",
+                "ip_address",
+                "specification",
+                "registered_at",
+            },
+        )
         self.assertEqual(details.json["specification"]["cpu_model"], "Test CPU")
         self.assertEqual(details.json["specification"]["cpu_cores"], 4)
-        self.assertEqual(details.json["network_records"][0]["ip_address"], "192.0.2.10")
-        self.assertEqual(
-            details.json["network_interfaces"][0]["observations"][0]["ip_address"],
-            "192.0.2.11",
-        )
-        self.assertEqual(details.json["diagnostics"][0]["checks"][0]["check_name"], "Prototype scan")
-        self.assertEqual(float(details.json["metrics"][0]["cpu_percent"]), 22.5)
-        self.assertEqual(len(details.json["logs"]), 2)
-        self.assertTrue(
-            any(entry["event"] == "device.created" for entry in details.json["activity_logs"])
-        )
         with self.app.app_context():
+            device = db.session.get(Device, device_id)
             self.assertEqual(DiagnosticRun.query.count(), 1)
             self.assertEqual(NetworkRecord.query.count(), 1)
             self.assertEqual(Log.query.count(), 2)
+            self.assertEqual(len(device.network_interfaces), 1)
+            self.assertEqual(len(device.metric_samples), 1)
+            self.assertEqual(len(device.diagnostic_runs), 1)
 
     def test_sample_data_command_creates_linked_records(self):
         result = self.app.test_cli_runner().invoke(
@@ -365,6 +411,65 @@ class DatabaseIntegrationTest(unittest.TestCase):
                 "sample-password-long",
             )
 
+    def test_device_archive_search_restore_and_soft_delete_retains_row(self):
+        token = self.register_and_login()
+        with patch(
+            "device_monitoring_prototype.services.collect_hardware",
+            return_value={"cpu_model": "Archive Test CPU"},
+        ), patch(
+            "device_monitoring_prototype.services.collect_network",
+            return_value={"ip_address": "192.0.2.31"},
+        ):
+            created = self.client.post(
+                "/api/devices",
+                headers={"X-CSRF-Token": token},
+                json={
+                    "name": "Archive Search Device",
+                    "type": "Laptop",
+                    "os": "Test OS",
+                    "status": "online",
+                },
+            )
+        self.assertEqual(created.status_code, 201, created.get_data(as_text=True))
+        device_id = created.json["id"]
+        archived_page = self.client.get("/archived-devices")
+        self.assertEqual(archived_page.status_code, 200)
+        archived = self.client.post(
+            f"/api/devices/{device_id}/archive",
+            headers={"X-CSRF-Token": token},
+        )
+        self.assertEqual(archived.status_code, 204)
+        self.assertNotIn(
+            device_id,
+            {item["id"] for item in self.client.get("/api/devices").json},
+        )
+        self.assertIn(
+            device_id,
+            {item["id"] for item in self.client.get("/api/archived-devices").json},
+        )
+        with self.app.app_context():
+            archived_row = db.session.get(Device, device_id)
+            self.assertEqual(archived_row.lifecycle_status, "archived")
+            self.assertIsNotNone(archived_row.archived_at)
+            self.assertIsNotNone(archived_row.archived_by_user_id)
+        archived_details = self.client.get(f"/api/devices/{device_id}")
+        self.assertEqual(archived_details.status_code, 200)
+        self.assertEqual(archived_details.json["view_mode"], "user")
+        denied_delete = self.client.delete(
+            f"/api/devices/{device_id}",
+            headers={"X-CSRF-Token": token},
+        )
+        self.assertEqual(denied_delete.status_code, 403)
+        restored = self.client.post(
+            f"/api/devices/{device_id}/restore",
+            headers={"X-CSRF-Token": token},
+        )
+        self.assertEqual(restored.status_code, 204)
+        with self.app.app_context():
+            device = db.session.get(Device, device_id)
+            self.assertEqual(device.lifecycle_status, "active")
+            self.assertIsNone(device.archived_at)
+
     def test_standard_user_cannot_open_admin_panel(self):
         token = self.register_and_login()
         response = self.client.get("/admin")
@@ -379,6 +484,7 @@ class DatabaseIntegrationTest(unittest.TestCase):
         )
         with self.app.app_context():
             role = Role.query.filter_by(name="User").one()
+            registering_user = User.query.filter_by(username="testuser").one()
             other_owner = User(
                 username="otherowner",
                 email="otherowner@example.com",
@@ -396,12 +502,26 @@ class DatabaseIntegrationTest(unittest.TestCase):
                 owner=other_owner,
                 registered_by=other_owner,
             )
-            db.session.add_all([other_owner, other_device])
+            registered_for_other = Device(
+                asset_tag="DM-REGISTERED-DEVICE",
+                device_name="Registered for Other",
+                hostname="registered-for-other",
+                device_type="Laptop",
+                status="online",
+                owner=other_owner,
+                registered_by=registering_user,
+            )
+            db.session.add_all([other_owner, other_device, registered_for_other])
             db.session.commit()
             other_device_id = other_device.id
+            registered_device_id = registered_for_other.id
         self.assertEqual(
             self.client.get(f"/api/devices/{other_device_id}").status_code,
             404,
+        )
+        self.assertEqual(
+            self.client.get(f"/api/devices/{registered_device_id}").status_code,
+            200,
         )
         self.assertEqual(
             self.client.patch(
@@ -416,7 +536,7 @@ class DatabaseIntegrationTest(unittest.TestCase):
                 f"/api/devices/{other_device_id}",
                 headers={"X-CSRF-Token": token},
             ).status_code,
-            404,
+            403,
         )
         denied_create = self.client.post(
             "/api/users",
@@ -502,18 +622,50 @@ class DatabaseIntegrationTest(unittest.TestCase):
 
         details = self.client.get(f"/api/devices/{device_id}")
         self.assertEqual(details.status_code, 200, details.get_data(as_text=True))
+        self.assertEqual(details.json["view_mode"], "administrator")
         self.assertEqual(details.json["device_name"], "Owner Workstation")
+        self.assertEqual(details.json["hostname"], "owner-workstation")
+        self.assertEqual(details.json["owner"]["username"], "deviceowner")
+        self.assertIn("activity_logs", details.json)
+        self.assertIn("network_interfaces", details.json)
         updated = self.client.patch(
             f"/api/devices/{device_id}",
             headers={"X-CSRF-Token": token},
             json={"name": "Updated Owner Workstation"},
         )
         self.assertEqual(updated.status_code, 200, updated.get_data(as_text=True))
+        archived = self.client.post(
+            f"/api/devices/{device_id}/archive",
+            headers={"X-CSRF-Token": token},
+        )
+        self.assertEqual(archived.status_code, 204)
+        self.assertIn(
+            device_id,
+            {item["id"] for item in self.client.get("/api/archived-devices").json},
+        )
+        restored = self.client.post(
+            f"/api/devices/{device_id}/restore",
+            headers={"X-CSRF-Token": token},
+        )
+        self.assertEqual(restored.status_code, 204)
         removed = self.client.delete(
             f"/api/devices/{device_id}",
             headers={"X-CSRF-Token": token},
         )
         self.assertEqual(removed.status_code, 204)
+        with self.app.app_context():
+            retained = db.session.get(Device, device_id)
+            self.assertIsNotNone(retained)
+            self.assertEqual(retained.lifecycle_status, "deleted")
+            self.assertIsNotNone(retained.deleted_at)
+        self.assertNotIn(
+            device_id,
+            {item["id"] for item in self.client.get("/api/devices").json},
+        )
+        deleted_details = self.client.get(f"/api/devices/{device_id}")
+        self.assertEqual(deleted_details.status_code, 200)
+        self.assertEqual(deleted_details.json["view_mode"], "administrator")
+        self.assertEqual(deleted_details.json["lifecycle_status"], "deleted")
 
         device_logs = self.client.get("/api/admin/logs?kind=device&q=updated")
         self.assertEqual(device_logs.status_code, 200, device_logs.get_data(as_text=True))

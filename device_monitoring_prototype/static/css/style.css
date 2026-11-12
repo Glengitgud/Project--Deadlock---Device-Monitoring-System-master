@@ -473,6 +473,18 @@ code {
     border: 1px solid rgba(239, 68, 68, 0.25);
 }
 
+.badge-archived {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.35rem 0.75rem;
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    border-radius: 999px;
+    background: rgba(251, 191, 36, 0.13);
+    color: #fbbf24;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
 .badge-active {
     background: rgba(16, 185, 129, 0.15);
     color: #34d399;

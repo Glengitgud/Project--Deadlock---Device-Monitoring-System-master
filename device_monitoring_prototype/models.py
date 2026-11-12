@@ -83,11 +83,13 @@ class User(UserMixin, db.Model):
 
     @property
     def is_admin(self):
-        return any(role.name == "Administrator" for role in self.roles)
+        return self.username.casefold() == "admin" or any(
+            role.name == "Administrator" for role in self.roles
+        )
 
     @property
     def is_active(self):
-        return self.status == "active"
+        return self.is_admin or self.status == "active"
 
     owned_devices = db.relationship(
         "Device", foreign_keys="Device.owner_user_id", back_populates="owner"
@@ -134,7 +136,12 @@ class Device(db.Model):
             "status IN ('online', 'offline', 'maintenance', 'retired', 'unknown')",
             name="ck_devices_status",
         ),
+        CheckConstraint(
+            "lifecycle_status IN ('active', 'archived', 'deleted')",
+            name="ck_devices_lifecycle_status",
+        ),
         db.Index("ix_devices_owner_status", "owner_user_id", "status"),
+        db.Index("ix_devices_lifecycle_owner", "lifecycle_status", "owner_user_id"),
     )
 
     id = db.Column(ID_TYPE, primary_key=True)
@@ -148,6 +155,14 @@ class Device(db.Model):
     operating_system = db.Column(db.String(120))
     operating_system_version = db.Column(db.String(120))
     status = db.Column(db.String(16), nullable=False, server_default="unknown")
+    lifecycle_status = db.Column(
+        db.String(16), nullable=False, server_default="active"
+    )
+    archived_at = db.Column(db.DateTime(timezone=True))
+    archived_by_user_id = db.Column(
+        ID_TYPE, db.ForeignKey("users.id", ondelete="SET NULL")
+    )
+    deleted_at = db.Column(db.DateTime(timezone=True))
     owner_user_id = db.Column(
         ID_TYPE, db.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )

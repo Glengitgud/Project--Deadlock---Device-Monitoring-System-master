@@ -15,7 +15,7 @@
     <!-- Custom Stylesheet -->
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
 </head>
-<body>
+<body data-is-admin="{{ 'true' if current_user.is_admin else 'false' }}">
 
     <!-- ======================================================
          SIDEBAR NAVIGATION
@@ -41,6 +41,13 @@
                    class="sidebar-link {% if active_page == 'devices' %}active{% endif %}">
                     <i class="bi bi-laptop"></i>
                     <span>My Devices</span>
+                </a>
+            </li>
+            <li>
+                <a href="/archived-devices" id="navArchivedDevices"
+                   class="sidebar-link {% if active_page == 'archived-devices' %}active{% endif %}">
+                    <i class="bi bi-archive"></i>
+                    <span>Archived Devices</span>
                 </a>
             </li>
             {% if current_user.is_admin %}

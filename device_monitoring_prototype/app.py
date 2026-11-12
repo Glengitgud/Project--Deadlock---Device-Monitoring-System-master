@@ -50,6 +50,8 @@ from device_monitoring_prototype.services import (
     create_user,
     deactivate_user,
     record_diagnostic,
+    restore_device,
+    soft_delete_device,
     update_device,
     update_user,
 )
@@ -58,6 +60,8 @@ login_manager = LoginManager()
 login_manager.login_view = "login"
 login_manager.login_message = "Please sign in to continue."
 login_manager.login_message_category = "warning"
+DEFAULT_ADMIN_USERNAME = "admin"
+DEFAULT_ADMIN_PASSWORD = "admin123"
 
 
 def _database_uri():
@@ -186,9 +190,17 @@ def create_app(test_config=None):
         return jsonify(error=str(error)), status
 
     def can_manage_device(device):
-        if device.status == "retired":
+        can_access_device(device)
+        if device.lifecycle_status != "active" or device.status == "retired":
             abort(404)
-        if not current_user.is_admin and device.owner_user_id != current_user.id:
+
+    def can_access_device(device):
+        if device.lifecycle_status == "deleted" and not current_user.is_admin:
+            abort(404)
+        if not current_user.is_admin and (
+            device.owner_user_id != current_user.id
+            and device.registered_by_user_id != current_user.id
+        ):
             abort(404)
 
     def serialize_device(device):
@@ -213,6 +225,8 @@ def create_app(test_config=None):
                 else "—"
             ),
             "status": device.status.capitalize(),
+            "lifecycleStatus": device.lifecycle_status,
+            "archivedAt": device.archived_at.isoformat() if device.archived_at else "",
             "registered": device.registered_at.isoformat() if device.registered_at else "",
             "lastUpdated": (
                 device.last_seen_at.isoformat()
@@ -318,6 +332,11 @@ def create_app(test_config=None):
     def devices():
         return render_template("devices.html", active_page="devices")
 
+    @app.get("/archived-devices")
+    @login_required
+    def archived_devices():
+        return render_template("archived_devices.html", active_page="archived-devices")
+
     @app.get("/admin")
     @admin_required
     def admin():
@@ -326,10 +345,36 @@ def create_app(test_config=None):
     @app.get("/api/devices")
     @login_required
     def list_devices():
-        query = Device.query.filter(Device.status != "retired")
+        query = Device.query.filter(
+            Device.lifecycle_status == "active",
+            Device.status != "retired",
+        )
         if not current_user.is_admin:
-            query = query.filter_by(owner_user_id=current_user.id)
+            query = query.filter(
+                or_(
+                    Device.owner_user_id == current_user.id,
+                    Device.registered_by_user_id == current_user.id,
+                )
+            )
         return jsonify([serialize_device(device) for device in query.order_by(Device.id.desc()).all()])
+
+    @app.get("/api/archived-devices")
+    @login_required
+    def list_archived_devices():
+        query = Device.query.filter_by(lifecycle_status="archived")
+        if not current_user.is_admin:
+            query = query.filter(
+                or_(
+                    Device.owner_user_id == current_user.id,
+                    Device.registered_by_user_id == current_user.id,
+                )
+            )
+        return jsonify(
+            [
+                serialize_device(device)
+                for device in query.order_by(Device.archived_at.desc(), Device.id.desc())
+            ]
+        )
 
     @app.post("/api/devices")
     @login_required
@@ -355,7 +400,7 @@ def create_app(test_config=None):
     @login_required
     def device_details(device_id):
         device = db.get_or_404(Device, device_id)
-        can_manage_device(device)
+        can_access_device(device)
         diagnostic_ids = [run.id for run in device.diagnostic_runs]
         activity_query = ActivityLog.query.filter(
             or_(
@@ -365,7 +410,7 @@ def create_app(test_config=None):
                 & (ActivityLog.entity_id.in_(diagnostic_ids or [-1])),
             )
         )
-        return jsonify(
+        details = jsonify(
             id=device.id,
             asset_tag=device.asset_tag,
             device_name=device.device_name,
@@ -377,6 +422,10 @@ def create_app(test_config=None):
             operating_system=device.operating_system,
             operating_system_version=device.operating_system_version,
             status=device.status,
+            lifecycle_status=device.lifecycle_status,
+            archived_at=device.archived_at.isoformat() if device.archived_at else None,
+            archived_by_user_id=device.archived_by_user_id,
+            deleted_at=device.deleted_at.isoformat() if device.deleted_at else None,
             owner_user_id=device.owner_user_id,
             registered_by_user_id=device.registered_by_user_id,
             owner={
@@ -538,14 +587,55 @@ def create_app(test_config=None):
                 }
                 for entry in activity_query.order_by(ActivityLog.occurred_at.desc())
             ],
+        ).get_json()
+        if current_user.is_admin:
+            details["view_mode"] = "administrator"
+            return jsonify(details)
+        latest_network = (
+            details["network_records"][0] if details["network_records"] else {}
+        )
+        return jsonify(
+            view_mode="user",
+            device_name=device.device_name,
+            device_type=device.device_type,
+            operating_system=device.operating_system,
+            status=device.status,
+            ip_address=latest_network.get("ip_address"),
+            specification=details["specification"],
+            registered_at=details["registered_at"],
         )
 
-    @app.delete("/api/devices/<int:device_id>")
+    @app.post("/api/devices/<int:device_id>/archive")
     @login_required
-    def delete_device(device_id):
+    def archive_device_route(device_id):
         device = db.get_or_404(Device, device_id)
         can_manage_device(device)
-        archive_device(device)
+        try:
+            archive_device(device)
+        except ValidationError as error:
+            return api_error(error)
+        return "", 204
+
+    @app.post("/api/devices/<int:device_id>/restore")
+    @login_required
+    def restore_device_route(device_id):
+        device = db.get_or_404(Device, device_id)
+        can_access_device(device)
+        try:
+            restore_device(device)
+        except ValidationError as error:
+            return api_error(error)
+        return "", 204
+
+    @app.delete("/api/devices/<int:device_id>")
+    @admin_required
+    def delete_device(device_id):
+        device = db.get_or_404(Device, device_id)
+        can_access_device(device)
+        try:
+            soft_delete_device(device)
+        except ValidationError as error:
+            return api_error(error)
         return "", 204
 
     @app.post("/api/devices/<int:device_id>/diagnostics")
@@ -606,7 +696,9 @@ def create_app(test_config=None):
     @app.get("/api/users")
     @admin_required
     def list_users():
-        users = User.query.order_by(User.id.asc()).all()
+        users = User.query.filter(
+            func.lower(User.username) != DEFAULT_ADMIN_USERNAME
+        ).order_by(User.id.asc()).all()
         return jsonify([serialize_user(user) for user in users])
 
     @app.post("/api/users")
@@ -658,9 +750,17 @@ def create_app(test_config=None):
     @app.get("/api/dashboard")
     @login_required
     def dashboard_data():
-        query = Device.query.filter(Device.status != "retired")
+        query = Device.query.filter(
+            Device.lifecycle_status == "active",
+            Device.status != "retired",
+        )
         if not current_user.is_admin:
-            query = query.filter_by(owner_user_id=current_user.id)
+            query = query.filter(
+                or_(
+                    Device.owner_user_id == current_user.id,
+                    Device.registered_by_user_id == current_user.id,
+                )
+            )
         devices = query.order_by(Device.id.desc()).all()
         return jsonify(
             devices=[serialize_device(device) for device in devices],
@@ -672,8 +772,8 @@ def create_app(test_config=None):
     @app.cli.command("init-db")
     def init_db_command():
         """Create missing model tables and seed standard RBAC roles/permissions."""
-        # Existing tables are not altered; upgrade the original XAMPP schema
-        # with migrations/003_upgrade_xampp_prototype.sql before this command.
+        # Existing tables are not altered; apply the documented schema migration
+        # before this command when upgrading an existing database.
         db.create_all()
         role_definitions = {
             "Administrator": "Full administrative access",
@@ -710,22 +810,22 @@ def create_app(test_config=None):
         ]
         db.session.commit()
 
-        default_admin = User.query.filter(func.lower(User.username) == "admin").one_or_none()
+        default_admin = User.query.filter(
+            func.lower(User.username) == DEFAULT_ADMIN_USERNAME
+        ).one_or_none()
+        created_admin = default_admin is None
         if default_admin is None:
             if User.query.filter(func.lower(User.email) == "admin@localhost").first():
                 raise click.ClickException(
                     "Cannot create the default admin account because admin@localhost is already in use."
                 )
             default_admin = User(
-                username="admin",
+                username=DEFAULT_ADMIN_USERNAME,
                 email="admin@localhost",
                 full_name="Administrator",
-                password_hash=generate_password_hash(
-                    os.environ.get("ADMIN_INITIAL_PASSWORD", "admin123")
-                ),
+                password_hash=generate_password_hash(DEFAULT_ADMIN_PASSWORD),
                 status="active",
             )
-            default_admin.roles.append(roles["Administrator"])
             db.session.add(default_admin)
             db.session.flush()
             db.session.add(
@@ -737,15 +837,15 @@ def create_app(test_config=None):
                     details={"username": default_admin.username},
                 )
             )
-            db.session.commit()
-            click.echo("Created the default Administrator account.")
-        elif not default_admin.is_admin:
-            raise click.ClickException(
-                "The username 'admin' already belongs to a non-administrator account. "
-                "Resolve that account before initializing the default Administrator."
-            )
-        else:
-            click.echo("The Administrator account already exists; it was not changed.")
+        default_admin.roles = [roles["Administrator"]]
+        default_admin.status = "active"
+        default_admin.password_hash = generate_password_hash(DEFAULT_ADMIN_PASSWORD)
+        db.session.commit()
+        click.echo(
+            "Created the default Administrator account."
+            if created_admin
+            else "The default Administrator account is active and ready."
+        )
         click.echo("Database tables and default RBAC roles are ready.")
 
     @app.cli.command("seed-sample-data")
