@@ -27,7 +27,7 @@
 | `device_metrics` | Historical CPU, memory, storage, and network metrics (not currently collected) |
 | `activity_logs` | Auditable account and system actions for administrator oversight |
 
-`schema.sql` creates the full MySQL/MariaDB schema from scratch. Existing databases created from the earlier project design must first be backed up and upgraded with `migrations/001_database_integration.sql`. Run `flask --app device_monitoring_prototype.app init-db` afterward to create missing tables, including `logs`, and seed the `Administrator` and `User` roles with their permissions.
+`schema.sql` creates the full MySQL/MariaDB schema from scratch. Existing databases created from the earlier project design must first be backed up and upgraded with `migrations/001_database_integration.sql`. The original XAMPP prototype schema has a separate upgrade, `migrations/003_upgrade_xampp_prototype.sql`; back up first and use it only when the legacy `users`, `devices`, and `logs` tables are empty. Then run `flask --app device_monitoring_prototype.app init-db` to create missing tables and seed the `Administrator` and `User` roles with their permissions. `db.create_all()` does not alter existing tables.
 
 ## Authentication and authorization
 

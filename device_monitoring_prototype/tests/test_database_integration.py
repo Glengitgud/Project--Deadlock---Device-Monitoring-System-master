@@ -1,12 +1,14 @@
+import os
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from sqlalchemy import inspect
+from sqlalchemy.engine import make_url
 from werkzeug.security import check_password_hash
 from werkzeug.security import generate_password_hash
 
-from device_monitoring_prototype.app import create_app
+from device_monitoring_prototype.app import _database_uri, create_app
 from device_monitoring_prototype.app import app as default_app
 from device_monitoring_prototype.models import (
     Device,
@@ -103,6 +105,16 @@ class DatabaseIntegrationTest(unittest.TestCase):
         load_dotenv.assert_called_once_with(
             dotenv_path=Path(default_app.root_path, ".env")
         )
+
+    def test_database_uri_defaults_to_xampp_mysql(self):
+        with patch.dict(os.environ, {}, clear=True):
+            url = make_url(_database_uri())
+        self.assertEqual(url.drivername, "mysql+pymysql")
+        self.assertEqual(url.host, "localhost")
+        self.assertEqual(url.port, 3306)
+        self.assertEqual(url.database, "devmonitor")
+        self.assertEqual(url.username, "root")
+        self.assertEqual(url.password, "")
 
     def test_init_db_command_includes_device_logs(self):
         result = self.app.test_cli_runner().invoke(args=["init-db"])

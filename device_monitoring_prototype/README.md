@@ -25,7 +25,7 @@ DevMonitor is a Flask application for centralized end-user device inventory and 
    ```
 6. Open **http://127.0.0.1:5000**. Public registration creates standard-user accounts only.
 
-`init-db` calls `db.create_all()` for every SQLAlchemy model and is safe to rerun to create missing tables. The app also accepts a `DATABASE_URL`. For an earlier DevMonitor schema, back up first and apply `migrations\001_database_integration.sql`; `init-db` will create the new device `logs` table. The current schema has a separate `activity_logs` table for broader account/system auditing.
+`init-db` calls `db.create_all()` for every SQLAlchemy model and is safe to rerun to create missing tables, but it does not alter existing tables. The app also accepts a `DATABASE_URL`. For an earlier DevMonitor schema, back up first and apply `migrations\001_database_integration.sql`. For the original XAMPP prototype schema, back up the database and apply `migrations\003_upgrade_xampp_prototype.sql` in phpMyAdmin before running `init-db`; that migration requires the legacy `users`, `devices`, and `logs` tables to be empty. The current schema has a separate `activity_logs` table for broader account/system auditing.
 
 Set `COOKIE_SECURE=true` when using HTTPS. The generated fallback session key is only suitable for local development; set a persistent `SECRET_KEY` for normal use. The app loads `device_monitoring_prototype\.env` when started from the repository root. Login and registration require a running MySQL server, valid credentials, an initialized schema, and seeded roles. If the database is unavailable, the app displays setup guidance instead of a generic 500 page.
 
@@ -71,4 +71,5 @@ If sign-in or registration reports that the database is unavailable, confirm MyS
 - `schema.sql` — complete MySQL/MariaDB schema for new installations.
 - `migrations\001_database_integration.sql` — one-time schema upgrade from the earlier design.
 - `migrations\002_device_event_logs.sql` — device event log table for manual upgrades.
+- `migrations\003_upgrade_xampp_prototype.sql` — upgrade the original empty XAMPP prototype tables.
 - `DATABASE_DESIGN.md` — ERD summary, tables, relationships, and example SQL queries.

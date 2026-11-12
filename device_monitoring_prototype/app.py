@@ -455,7 +455,9 @@ def create_app(test_config=None):
 
     @app.cli.command("init-db")
     def init_db_command():
-        """Create missing tables and seed standard RBAC roles/permissions."""
+        """Create missing model tables and seed standard RBAC roles/permissions."""
+        # Existing tables are not altered; upgrade the original XAMPP schema
+        # with migrations/003_upgrade_xampp_prototype.sql before this command.
         db.create_all()
         role_definitions = {
             "Administrator": "Full administrative access",
