@@ -35,6 +35,10 @@ The app loads `device_monitoring_prototype\.env` explicitly when started from th
 
 **Collection limitation:** the current collector records information about the computer running Flask, not an arbitrary remote device entered in the form. Remote hardware, network, and real diagnostic collection requires an installed, authenticated endpoint agent; those monitoring checks are not implemented here.
 
+## Database unavailable
+
+If sign-in or registration reports that the database is unavailable, confirm MySQL is running, the `devmonitor` database and application user exist, and `device_monitoring_prototype\.env` contains real credentials (not the example placeholders). MySQL error 1045 means the server rejected the configured user/password or its database access. Then run `python -m flask --app device_monitoring_prototype.app init-db` from the repository root and restart Flask. Back up and apply the documented migration first if upgrading an existing schema.
+
 ## Files
 
 - `app.py` — Flask application, authentication, views, JSON CRUD endpoints, and CLI commands.

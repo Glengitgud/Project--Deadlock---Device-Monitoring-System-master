@@ -134,6 +134,8 @@ class DatabaseIntegrationTest(unittest.TestCase):
             )
             self.assertEqual(login_response.status_code, 503)
             self.assertIn(b"database is unavailable", login_response.data.lower())
+            self.assertIn(b"Copy-Item", login_response.data)
+            self.assertIn(b"device_monitoring_prototype.app init-db", login_response.data)
 
             with app.app_context():
                 db.create_all()

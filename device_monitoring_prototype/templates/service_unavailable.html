@@ -13,6 +13,24 @@
                 <h3>Database unavailable</h3>
                 <p>{{ message }}</p>
             </div>
+            <div class="mb-4">
+                <h5>Reconnect DevMonitor</h5>
+                <ol>
+                    <li>Start MySQL and confirm the <code>devmonitor</code> database and app user exist.</li>
+                    <li>
+                        From the repository root, copy
+                        <code>device_monitoring_prototype\.env.example</code> to
+                        <code>device_monitoring_prototype\.env</code> and replace the example
+                        MySQL credentials and secret key with your own.
+                        <pre class="mt-2"><code>Copy-Item device_monitoring_prototype\.env.example device_monitoring_prototype\.env</code></pre>
+                    </li>
+                    <li>
+                        Initialize missing tables and default roles:
+                        <pre class="mt-2"><code>python -m flask --app device_monitoring_prototype.app init-db</code></pre>
+                    </li>
+                    <li>Restart Flask and try again. Back up and migrate an existing legacy database before initialization.</li>
+                </ol>
+            </div>
             <p class="text-center mb-0">
                 <a href="{{ url_for('login') }}">Return to sign in</a>
             </p>
