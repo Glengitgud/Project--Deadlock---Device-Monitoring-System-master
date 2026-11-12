@@ -31,16 +31,17 @@ Design principles followed:
 
 ## Implemented Database Features
 
-The application now uses MySQL through Flask-SQLAlchemy. Public registration stores a standard-user account with a Werkzeug password hash; Flask-Login manages sessions. Administrator-only user management and owner-scoped device operations are enforced by Flask views, not by JavaScript alone.
+The application now uses MySQL through Flask-SQLAlchemy. Public registration stores a standard-user account with a Werkzeug password hash; Flask-Login manages sessions. The first `init-db` run creates a hashed-password `admin` account if it is absent. Administrator-only user management/log access and owner-scoped device operations are enforced by Flask views, not by JavaScript alone.
 
 | Feature | Current implementation |
 |---|---|
-| **User Registration and Login** | User records and hashed passwords are persisted in MySQL; invalid credentials are rejected. |
-| **Role-Based Access** | Roles and permissions are stored in RBAC tables; `/admin` and user-management endpoints require an administrator. |
+| **User Registration and Login** | User records and hashed passwords are persisted in MySQL; invalid credentials are rejected and login attempts are recorded in activity logs. |
+| **Role-Based Access** | Roles and permissions are stored in RBAC tables; `/admin`, user-management, and administrator log endpoints require an administrator. |
 | **Device Registration** | Device and owner foreign key, specification row, and network record are persisted together. |
 | **Device Editing and Removal** | Device fields are updated in the database; removal archives the device and retains history. |
 | **Diagnostic History** | Each scan action creates a new, explicitly placeholder diagnostic record; no actual diagnostic test runs. |
 | **User Management** | Administrators can create accounts, update roles/status, and deactivate users without deleting their history. |
+| **Device Details and Logs** | Read-only details show stored device relationships; administrators can search/filter activity and device event logs. These are application records, not operating-system or web-server logs. |
 | **Dashboard** | Fleet counts and rows are queried from MySQL. |
 | **Search, Sort and Pagination** | Browser-side presentation of records returned from the database-backed endpoints. |
 | **Input and Session Security** | Server-side validation, CSRF token checks, HttpOnly/SameSite cookies, and configurable Secure cookies. |
@@ -55,6 +56,8 @@ technologies.
 
 ### 1. Account Hardening
 - Add MFA, password reset, rate limiting, and operational account recovery.
+- The `admin` / `admin123` bootstrap credential is for local setup only. Set `ADMIN_INITIAL_PASSWORD` before first initialization and replace the initial password immediately.
+- For multi-domain login, keep local username login separate from organization email login. Validate email syntax, normalize and check the domain against an administrator-managed allowed-domains table, verify credentials and account status (active, suspended, or disabled), record success/failure without logging credentials, then redirect by assigned role. Verify domain ownership before enabling it; an email suffix alone does not establish identity.
 
 ### 2. Endpoint Agent and Real Device Collection
 - Install an authenticated agent on each end-user device to collect that endpoint's hardware and network information. The current collector sees only the machine running Flask.
@@ -83,7 +86,7 @@ technologies.
 - Add load balancing and horizontal scaling for larger organizations.
 
 ### 8. Audit Logging
-- Expand audit coverage to include authentication events and every administrative change.
+- Continue expanding audit coverage to include any future administrative actions and operational events.
 
 ---
 

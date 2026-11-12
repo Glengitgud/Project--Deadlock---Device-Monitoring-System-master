@@ -17,17 +17,16 @@ DevMonitor is a Flask application for centralized end-user device inventory and 
    ```powershell
    pip install Flask Flask-SQLAlchemy PyMySQL Flask-Login Werkzeug python-dotenv psutil cryptography
    ```
-5. Create the tables and default RBAC roles, create the first administrator, then start the app:
+5. Create the tables and default RBAC roles/administrator, then start the app:
    ```powershell
    python -m flask --app device_monitoring_prototype.app init-db
-   python -m flask --app device_monitoring_prototype.app create-admin
    python -m flask --app device_monitoring_prototype.app run
    ```
 6. Open **http://127.0.0.1:5000**. Public registration creates standard-user accounts only.
 
 `init-db` calls `db.create_all()` for every SQLAlchemy model and is safe to rerun to create missing tables, but it does not alter existing tables. The app also accepts a `DATABASE_URL`. For an earlier DevMonitor schema, back up first and apply `migrations\001_database_integration.sql`. For the original XAMPP prototype schema, back up the database and apply `migrations\003_upgrade_xampp_prototype.sql` in phpMyAdmin before running `init-db`; that migration requires the legacy `users`, `devices`, and `logs` tables to be empty. The current schema has a separate `activity_logs` table for broader account/system auditing.
 
-On first initialization, `init-db` creates the `admin` Administrator account with password `admin123` if that username is unused. Change this development bootstrap password immediately; set `ADMIN_INITIAL_PASSWORD` before initialization to choose a different initial password. Re-running initialization does not reset an existing account.
+On first initialization, `init-db` creates the `admin` Administrator account with password `admin123` if that username is unused. Change this development bootstrap password immediately; set `ADMIN_INITIAL_PASSWORD` before initialization to choose a different initial password. Re-running initialization does not reset an existing account. Use `create-admin` only when adding another administrator.
 
 Set `COOKIE_SECURE=true` when using HTTPS. The generated fallback session key is only suitable for local development; set a persistent `SECRET_KEY` for normal use. The app loads `device_monitoring_prototype\.env` when started from the repository root. Login and registration require a running MySQL server, valid credentials, an initialized schema, and seeded roles. If the database is unavailable, the app displays setup guidance instead of a generic 500 page.
 

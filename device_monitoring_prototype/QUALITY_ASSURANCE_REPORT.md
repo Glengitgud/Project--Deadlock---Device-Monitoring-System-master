@@ -11,13 +11,13 @@ This review covers the implemented application and the production roadmap in `FE
 | Feature area | Current behavior | Verification and limitations |
 |---|---|---|
 | Startup and authentication pages | Flask serves sign-in and registration; package-based commands initialize the app. | Login and registration pages render in integration tests. |
-| Accounts and passwords | Registration creates standard-user accounts; Werkzeug hashes passwords; login checks the hash; accounts can be disabled. | Tests verify registration, hash storage, correct/incorrect passwords, and disabled/admin restrictions. Password reset and MFA are not implemented. |
-| Sessions and request security | Flask-Login sessions, CSRF validation for writes, HttpOnly/SameSite cookies, configurable Secure cookies, and server-side authorization. | Tests exercise authenticated routes and role restrictions. Rate limiting and production HTTPS are not implemented. |
-| Roles and administration | `init-db` seeds Administrator/User roles and permissions; admins can create, edit, and deactivate users; the last active admin cannot be removed or demoted. | Tests cover admin access, user creation, and role protections. |
-| Device inventory | Signed-in users register, edit, view, and archive their own devices; admins can manage all devices; archived records retain history. | Tests verify owner linkage and persisted specification/network data. |
+| Accounts and passwords | Registration creates standard-user accounts; Werkzeug hashes passwords; `init-db` creates the initial `admin` account if absent; login records success/failure. | Tests verify registration, hashes, bootstrap-admin idempotency/login, and role restrictions. The bootstrap password must be changed before deployment; reset and MFA are not implemented. |
+| Sessions and request security | Flask-Login sessions, CSRF validation for writes, HttpOnly/SameSite cookies, configurable Secure cookies, and server-side authorization. | Tests exercise authenticated routes, owner scoping, admin-only APIs, and access-denied responses. Rate limiting and production HTTPS are not implemented. |
+| Roles and administration | `init-db` seeds Administrator/User roles and permissions; admins can create, edit, and deactivate users and search/filter activity and device logs; the last active admin cannot be removed or demoted. | Tests cover admin login, user CRUD, log filters, user denial, and role protections. |
+| Device inventory | Signed-in users register, edit, view, and archive their own devices; admins can manage all devices; archived records retain history. The eye action loads selected-device details in a read-only view. | Tests verify owner linkage, stored specifications/network/diagnostics/logs, detail access, and cross-owner denial. |
 | Dashboard and device UI | Dashboard reads authorized fleet records; device page provides search, sort, pagination, device actions, and toast feedback. | Routes and APIs are tested; the browser interactions and responsive layout have not had automated browser or device-matrix testing. |
 | Host inventory | Registration stores best-effort hardware and network information from the machine running Flask. | Tests use deterministic collector values. This is not remote endpoint collection; GPU and motherboard values are currently unavailable. |
-| Diagnostics and history | A scan appends a diagnostic run/check and history APIs return diagnostic and network records. | Persistence is tested. The scan is explicitly a placeholder and does not execute hardware checks. |
+| Diagnostics and history | A scan appends a diagnostic run/check; device detail/history APIs return diagnostic, network, activity, and device-log records. | Persistence is tested. The scan is explicitly a placeholder and does not execute hardware checks. |
 | UI/UX | Dark minimal theme, responsive sidebar, Bootstrap components, login/register, dashboard, device, and admin pages. | Templates and static assets are served by the app; visual accessibility/contrast and cross-browser behavior have not been independently measured. |
 | Roadmap features | Live telemetry/alerts, reporting, endpoint agents, recovery/MFA, real diagnostics, and production deployment are listed as future work. | Not implemented or claimed as passing; see `FEATURES_AND_FUTURE_WORK.md`. |
 
@@ -55,7 +55,7 @@ Run from the repository root:
 .\.venv\Scripts\python.exe -m unittest discover -s device_monitoring_prototype\tests -v
 ```
 
-The ten integration tests pass. They cover page rendering, environment-file selection, registration/login and password hashes, database/seed-data error responses, standard-user pages/APIs, device ownership and persisted snapshots/history, table creation and role seeding, linked device logs, sample data insertion, standard-user admin denial, and administrator account/role protections. Test databases are isolated SQLite instances; no live XAMPP/MySQL connection or browser automation was run.
+The integration suite covers page rendering, environment-file selection, registration/login and password hashes, default-administrator idempotency/login, database/seed-data error responses, device-detail serialization and ownership boundaries, admin device/user CRUD, administrator log searching/filtering, role protections, and sample data. Test databases are isolated SQLite instances; browser automation and a cross-browser responsive review were not run.
 
 ## Release risks and acceptance follow-up
 

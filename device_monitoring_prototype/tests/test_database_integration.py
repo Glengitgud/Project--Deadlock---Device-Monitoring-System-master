@@ -11,9 +11,13 @@ from werkzeug.security import generate_password_hash
 from device_monitoring_prototype.app import _database_uri, create_app
 from device_monitoring_prototype.app import app as default_app
 from device_monitoring_prototype.models import (
+    ActivityLog,
     Device,
+    DeviceMetric,
     DiagnosticRun,
     Log,
+    NetworkInterface,
+    NetworkObservation,
     NetworkRecord,
     Role,
     User,
@@ -206,6 +210,33 @@ class DatabaseIntegrationTest(unittest.TestCase):
         self.register_and_login()
         self.assertEqual(self.client.get("/dashboard").status_code, 200)
 
+    def test_failed_login_is_recorded_without_storing_password(self):
+        token = self.register_and_login()
+        logout = self.client.post(
+            "/logout",
+            data={"csrf_token": token},
+        )
+        self.assertEqual(logout.status_code, 302)
+        self.client.get("/login")
+        with self.client.session_transaction() as session:
+            token = session["_csrf_token"]
+        response = self.client.post(
+            "/login",
+            data={
+                "csrf_token": token,
+                "username": "testuser",
+                "password": "incorrect-password",
+            },
+        )
+        self.assertEqual(response.status_code, 401)
+        with self.app.app_context():
+            entry = ActivityLog.query.filter_by(
+                event_type="auth.login_failed"
+            ).order_by(ActivityLog.id.desc()).first()
+            self.assertIsNotNone(entry)
+            self.assertEqual(entry.details, {"username": "testuser"})
+            self.assertNotIn("incorrect-password", str(entry.details))
+
     def test_device_registration_and_history_are_persisted(self):
         token = self.register_and_login()
         hardware = {
@@ -252,6 +283,38 @@ class DatabaseIntegrationTest(unittest.TestCase):
             self.assertEqual(len(device.network_records), 1)
             self.assertEqual(len(device.logs), 1)
             self.assertEqual(device.logs[0].event, "Device registered")
+            interface = NetworkInterface(
+                device=device,
+                interface_name="Ethernet",
+                mac_address="00:11:22:33:44:55",
+                interface_type="wired",
+                is_primary=True,
+            )
+            interface.observations.append(
+                NetworkObservation(
+                    ip_address="192.0.2.11",
+                    subnet_prefix=24,
+                    gateway="192.0.2.1",
+                    dns_servers=["192.0.2.53"],
+                    connection_type="wired",
+                )
+            )
+            db.session.add_all(
+                [
+                    interface,
+                    DeviceMetric(
+                        device=device,
+                        cpu_percent=22.5,
+                        memory_percent=40,
+                        storage_percent=55,
+                        memory_used_bytes=8 * 1024**3,
+                        storage_used_bytes=200 * 1024**3,
+                        network_rx_bytes=1024,
+                        network_tx_bytes=2048,
+                    ),
+                ]
+            )
+            db.session.commit()
 
         response = self.client.post(
             f"/api/devices/{device_id}/diagnostics",
@@ -270,8 +333,16 @@ class DatabaseIntegrationTest(unittest.TestCase):
         self.assertEqual(details.json["specification"]["cpu_model"], "Test CPU")
         self.assertEqual(details.json["specification"]["cpu_cores"], 4)
         self.assertEqual(details.json["network_records"][0]["ip_address"], "192.0.2.10")
+        self.assertEqual(
+            details.json["network_interfaces"][0]["observations"][0]["ip_address"],
+            "192.0.2.11",
+        )
         self.assertEqual(details.json["diagnostics"][0]["checks"][0]["check_name"], "Prototype scan")
+        self.assertEqual(float(details.json["metrics"][0]["cpu_percent"]), 22.5)
         self.assertEqual(len(details.json["logs"]), 2)
+        self.assertTrue(
+            any(entry["event"] == "device.created" for entry in details.json["activity_logs"])
+        )
         with self.app.app_context():
             self.assertEqual(DiagnosticRun.query.count(), 1)
             self.assertEqual(NetworkRecord.query.count(), 1)
@@ -295,8 +366,158 @@ class DatabaseIntegrationTest(unittest.TestCase):
             )
 
     def test_standard_user_cannot_open_admin_panel(self):
-        self.register_and_login()
-        self.assertEqual(self.client.get("/admin").status_code, 403)
+        token = self.register_and_login()
+        response = self.client.get("/admin")
+        self.assertEqual(response.status_code, 403)
+        self.assertIn(b"Administrator access is required", response.data)
+        self.assertEqual(self.client.get("/api/users").status_code, 403)
+        denied_logs = self.client.get("/api/admin/logs")
+        self.assertEqual(denied_logs.status_code, 403)
+        self.assertEqual(
+            denied_logs.json["error"],
+            "Administrator access is required for this action.",
+        )
+        with self.app.app_context():
+            role = Role.query.filter_by(name="User").one()
+            other_owner = User(
+                username="otherowner",
+                email="otherowner@example.com",
+                full_name="Other Owner",
+                password_hash=generate_password_hash("other-owner-password"),
+                status="active",
+            )
+            other_owner.roles.append(role)
+            other_device = Device(
+                asset_tag="DM-PRIVATE-DEVICE",
+                device_name="Private Device",
+                hostname="private-device",
+                device_type="Laptop",
+                status="online",
+                owner=other_owner,
+                registered_by=other_owner,
+            )
+            db.session.add_all([other_owner, other_device])
+            db.session.commit()
+            other_device_id = other_device.id
+        self.assertEqual(
+            self.client.get(f"/api/devices/{other_device_id}").status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.patch(
+                f"/api/devices/{other_device_id}",
+                headers={"X-CSRF-Token": token},
+                json={"name": "Unauthorized edit"},
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.delete(
+                f"/api/devices/{other_device_id}",
+                headers={"X-CSRF-Token": token},
+            ).status_code,
+            404,
+        )
+        denied_create = self.client.post(
+            "/api/users",
+            headers={"X-CSRF-Token": token},
+            json={
+                "full_name": "Denied User",
+                "email": "denied@example.com",
+                "username": "denied",
+                "password": "denied-password-long-enough",
+                "role": "User",
+            },
+        )
+        self.assertEqual(denied_create.status_code, 403)
+
+    def test_admin_can_register_and_manage_other_users_devices_and_search_device_logs(self):
+        with self.app.app_context():
+            administrator = User(
+                username="deviceadmin",
+                email="deviceadmin@example.com",
+                full_name="Device Admin",
+                password_hash=generate_password_hash("device-admin-password"),
+                status="active",
+            )
+            owner = User(
+                username="deviceowner",
+                email="deviceowner@example.com",
+                full_name="Device Owner",
+                password_hash=generate_password_hash("device-owner-password"),
+                status="active",
+            )
+            admin_role = Role.query.filter_by(name="Administrator").one()
+            user_role = Role.query.filter_by(name="User").one()
+            administrator.roles.append(admin_role)
+            owner.roles.append(user_role)
+            device = Device(
+                asset_tag="DM-OWNED-DEVICE",
+                device_name="Owner Workstation",
+                hostname="owner-workstation",
+                device_type="Workstation",
+                status="online",
+                owner=owner,
+                registered_by=owner,
+            )
+            db.session.add_all([administrator, owner, device])
+            db.session.commit()
+            device_id = device.id
+
+        self.client.get("/login")
+        with self.client.session_transaction() as session:
+            token = session["_csrf_token"]
+        login = self.client.post(
+            "/login",
+            data={
+                "csrf_token": token,
+                "username": "deviceadmin",
+                "password": "device-admin-password",
+            },
+        )
+        self.assertEqual(login.status_code, 302)
+        self.client.get("/dashboard")
+        with self.client.session_transaction() as session:
+            token = session["_csrf_token"]
+
+        with patch(
+            "device_monitoring_prototype.services.collect_hardware",
+            return_value={"cpu_model": "Admin Test CPU"},
+        ), patch(
+            "device_monitoring_prototype.services.collect_network",
+            return_value={"ip_address": "192.0.2.20"},
+        ):
+            created = self.client.post(
+                "/api/devices",
+                headers={"X-CSRF-Token": token},
+                json={
+                    "name": "Admin Registered Device",
+                    "type": "Desktop",
+                    "os": "Test OS",
+                    "status": "online",
+                },
+            )
+        self.assertEqual(created.status_code, 201, created.get_data(as_text=True))
+        self.assertEqual(self.client.get("/api/devices").status_code, 200)
+
+        details = self.client.get(f"/api/devices/{device_id}")
+        self.assertEqual(details.status_code, 200, details.get_data(as_text=True))
+        self.assertEqual(details.json["device_name"], "Owner Workstation")
+        updated = self.client.patch(
+            f"/api/devices/{device_id}",
+            headers={"X-CSRF-Token": token},
+            json={"name": "Updated Owner Workstation"},
+        )
+        self.assertEqual(updated.status_code, 200, updated.get_data(as_text=True))
+        removed = self.client.delete(
+            f"/api/devices/{device_id}",
+            headers={"X-CSRF-Token": token},
+        )
+        self.assertEqual(removed.status_code, 204)
+
+        device_logs = self.client.get("/api/admin/logs?kind=device&q=updated")
+        self.assertEqual(device_logs.status_code, 200, device_logs.get_data(as_text=True))
+        self.assertTrue(any("updated" in entry["event"].lower() for entry in device_logs.json))
 
     def test_admin_can_create_users_and_role_changes_are_server_checked(self):
         with self.app.app_context():
@@ -341,6 +562,14 @@ class DatabaseIntegrationTest(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 201, response.get_data(as_text=True))
+        managed_user_id = response.json["id"]
+        response = self.client.patch(
+            f"/api/users/{managed_user_id}",
+            headers={"X-CSRF-Token": token},
+            json={"full_name": "Updated Managed User"},
+        )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.json["fullName"], "Updated Managed User")
         denied = self.client.patch(
             f"/api/users/{admin_id}",
             headers={"X-CSRF-Token": token},
@@ -348,6 +577,19 @@ class DatabaseIntegrationTest(unittest.TestCase):
         )
         self.assertEqual(denied.status_code, 400)
         self.assertEqual(self.client.get("/api/users").status_code, 200)
+
+        logs = self.client.get("/api/admin/logs?kind=activity&q=auth.login_succeeded")
+        self.assertEqual(logs.status_code, 200, logs.get_data(as_text=True))
+        self.assertTrue(any(entry["event"] == "auth.login_succeeded" for entry in logs.json))
+        invalid_filter = self.client.get("/api/admin/logs?kind=unknown")
+        self.assertEqual(invalid_filter.status_code, 400)
+        response = self.client.delete(
+            f"/api/users/{managed_user_id}",
+            headers={"X-CSRF-Token": token},
+        )
+        self.assertEqual(response.status_code, 204)
+        with self.app.app_context():
+            self.assertEqual(db.session.get(User, managed_user_id).status, "inactive")
 
 
 if __name__ == "__main__":

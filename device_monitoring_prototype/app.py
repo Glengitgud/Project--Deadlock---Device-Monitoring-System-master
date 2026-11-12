@@ -28,11 +28,12 @@ from flask_login import (
     logout_user,
 )
 from dotenv import load_dotenv
-from sqlalchemy import func
+from sqlalchemy import String, cast, func, or_
 from sqlalchemy.exc import SQLAlchemyError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from device_monitoring_prototype.models import (
+    ActivityLog,
     Device,
     Log,
     NetworkRecord,
@@ -112,6 +113,13 @@ def create_app(test_config=None):
         if request.path.startswith("/api/"):
             return jsonify(error=message), 503
         return render_template("service_unavailable.html", message=message), 503
+
+    @app.errorhandler(403)
+    def handle_forbidden(error):
+        message = "Administrator access is required for this action."
+        if request.path.startswith("/api/"):
+            return jsonify(error=message), 403
+        return render_template("access_denied.html", message=message), 403
 
     @login_manager.unauthorized_handler
     def handle_unauthorized():
@@ -239,6 +247,16 @@ def create_app(test_config=None):
                 or not user.is_active
                 or not check_password_hash(user.password_hash, password)
             ):
+                db.session.add(
+                    ActivityLog(
+                        actor_user_id=user.id if user else None,
+                        event_type="auth.login_failed",
+                        entity_type="user" if user else None,
+                        entity_id=user.id if user else None,
+                        details={"username": username},
+                    )
+                )
+                db.session.commit()
                 flash("Invalid username or password.", "danger")
                 return render_template("login.html"), 401
             next_url = request.form.get("next", "") or request.args.get("next", "")
@@ -249,6 +267,15 @@ def create_app(test_config=None):
             session.clear()
             login_user(user, remember=False, fresh=True)
             user.last_login_at = datetime.now(timezone.utc)
+            db.session.add(
+                ActivityLog(
+                    actor_user_id=user.id,
+                    event_type="auth.login_succeeded",
+                    entity_type="user",
+                    entity_id=user.id,
+                    details={"username": user.username},
+                )
+            )
             db.session.commit()
             return redirect(next_url or url_for("dashboard"))
         return render_template("login.html")
@@ -329,6 +356,15 @@ def create_app(test_config=None):
     def device_details(device_id):
         device = db.get_or_404(Device, device_id)
         can_manage_device(device)
+        diagnostic_ids = [run.id for run in device.diagnostic_runs]
+        activity_query = ActivityLog.query.filter(
+            or_(
+                (ActivityLog.entity_type == "device")
+                & (ActivityLog.entity_id == device.id),
+                (ActivityLog.entity_type == "diagnostic_run")
+                & (ActivityLog.entity_id.in_(diagnostic_ids or [-1])),
+            )
+        )
         return jsonify(
             id=device.id,
             asset_tag=device.asset_tag,
@@ -341,6 +377,8 @@ def create_app(test_config=None):
             operating_system=device.operating_system,
             operating_system_version=device.operating_system_version,
             status=device.status,
+            owner_user_id=device.owner_user_id,
+            registered_by_user_id=device.registered_by_user_id,
             owner={
                 "id": device.owner.id,
                 "username": device.owner.username,
@@ -351,11 +389,13 @@ def create_app(test_config=None):
                 "id": device.registered_by.id,
                 "username": device.registered_by.username,
                 "full_name": device.registered_by.full_name,
+                "email": device.registered_by.email,
             } if device.registered_by else None,
             registered_at=device.registered_at.isoformat() if device.registered_at else None,
             updated_at=device.updated_at.isoformat() if device.updated_at else None,
             last_seen_at=device.last_seen_at.isoformat() if device.last_seen_at else None,
             specification={
+                "device_id": device.hardware_spec.device_id,
                 "cpu_model": device.hardware_spec.cpu_model,
                 "cpu_cores": device.hardware_spec.cpu_cores,
                 "cpu_threads": device.hardware_spec.cpu_threads,
@@ -372,6 +412,8 @@ def create_app(test_config=None):
             } if device.hardware_spec else None,
             network_records=[
                 {
+                    "id": record.id,
+                    "device_id": record.device_id,
                     "ip_address": record.ip_address,
                     "subnet_mask": record.subnet_mask,
                     "default_gateway": record.default_gateway,
@@ -387,12 +429,17 @@ def create_app(test_config=None):
             ],
             network_interfaces=[
                 {
+                    "id": interface.id,
+                    "device_id": interface.device_id,
                     "interface_name": interface.interface_name,
                     "mac_address": interface.mac_address,
                     "interface_type": interface.interface_type,
                     "is_primary": interface.is_primary,
+                    "created_at": interface.created_at.isoformat(),
                     "observations": [
                         {
+                            "id": observation.id,
+                            "interface_id": observation.interface_id,
                             "ip_address": observation.ip_address,
                             "subnet_prefix": observation.subnet_prefix,
                             "gateway": observation.gateway,
@@ -413,6 +460,12 @@ def create_app(test_config=None):
             diagnostics=[
                 {
                     "id": run.id,
+                    "device_id": run.device_id,
+                    "initiated_by_user_id": run.initiated_by_user_id,
+                    "initiated_by": {
+                        "username": run.initiated_by.username,
+                        "full_name": run.initiated_by.full_name,
+                    } if run.initiated_by else None,
                     "status": run.status,
                     "summary": run.summary,
                     "detected_problem": run.detected_problem,
@@ -421,6 +474,8 @@ def create_app(test_config=None):
                     "finished_at": run.finished_at.isoformat() if run.finished_at else None,
                     "checks": [
                         {
+                            "id": check.id,
+                            "run_id": check.run_id,
                             "check_name": check.check_name,
                             "category": check.category,
                             "status": check.status,
@@ -439,6 +494,8 @@ def create_app(test_config=None):
             ],
             metrics=[
                 {
+                    "id": metric.id,
+                    "device_id": metric.device_id,
                     "cpu_percent": metric.cpu_percent,
                     "memory_percent": metric.memory_percent,
                     "storage_percent": metric.storage_percent,
@@ -457,6 +514,7 @@ def create_app(test_config=None):
             logs=[
                 {
                     "id": entry.id,
+                    "device_id": entry.device_id,
                     "event": entry.event,
                     "timestamp": entry.timestamp.isoformat(),
                 }
@@ -465,6 +523,20 @@ def create_app(test_config=None):
                     key=lambda item: item.timestamp,
                     reverse=True,
                 )
+            ],
+            activity_logs=[
+                {
+                    "event": entry.event_type,
+                    "actor_user_id": entry.actor_user_id,
+                    "entity_type": entry.entity_type,
+                    "entity_id": entry.entity_id,
+                    "actor": entry.actor.full_name or entry.actor.username
+                    if entry.actor else "System",
+                    "details": entry.details,
+                    "id": entry.id,
+                    "occurred_at": entry.occurred_at.isoformat(),
+                }
+                for entry in activity_query.order_by(ActivityLog.occurred_at.desc())
             ],
         )
 
@@ -655,6 +727,16 @@ def create_app(test_config=None):
             )
             default_admin.roles.append(roles["Administrator"])
             db.session.add(default_admin)
+            db.session.flush()
+            db.session.add(
+                ActivityLog(
+                    actor_user_id=None,
+                    event_type="auth.admin_bootstrapped",
+                    entity_type="user",
+                    entity_id=default_admin.id,
+                    details={"username": default_admin.username},
+                )
+            )
             db.session.commit()
             click.echo("Created the default Administrator account.")
         elif not default_admin.is_admin:
@@ -763,6 +845,76 @@ def create_app(test_config=None):
         db.session.add(user)
         db.session.commit()
         click.echo("Administrator account created.")
+
+    @app.get("/api/admin/logs")
+    @admin_required
+    def admin_logs():
+        kind = request.args.get("kind", "all")
+        query_text = request.args.get("q", "").strip()
+        if kind not in {"all", "activity", "device"}:
+            return api_error("Log kind must be all, activity, or device.")
+        if len(query_text) > 100:
+            return api_error("Log search text must be 100 characters or fewer.")
+
+        pattern = f"%{query_text}%"
+        results = []
+        if kind in {"all", "activity"}:
+            activity_query = ActivityLog.query.outerjoin(
+                User, ActivityLog.actor_user_id == User.id
+            )
+            if query_text:
+                activity_query = activity_query.filter(
+                    or_(
+                        ActivityLog.event_type.ilike(pattern),
+                        ActivityLog.entity_type.ilike(pattern),
+                        User.username.ilike(pattern),
+                        User.display_name.ilike(pattern),
+                        cast(ActivityLog.details, String).ilike(pattern),
+                    )
+                )
+            results.extend(
+                {
+                    "id": entry.id,
+                    "kind": "activity",
+                    "event": entry.event_type,
+                    "entity": entry.entity_type,
+                    "entity_id": entry.entity_id,
+                    "actor": entry.actor.full_name or entry.actor.username
+                    if entry.actor else "System",
+                    "details": entry.details,
+                    "timestamp": entry.occurred_at.isoformat(),
+                }
+                for entry in activity_query.order_by(
+                    ActivityLog.occurred_at.desc()
+                ).limit(200)
+            )
+
+        if kind in {"all", "device"}:
+            device_query = Log.query.join(Device, Log.device_id == Device.id)
+            if query_text:
+                device_query = device_query.filter(
+                    or_(
+                        Log.event.ilike(pattern),
+                        Device.device_name.ilike(pattern),
+                        cast(Log.device_id, String).ilike(pattern),
+                    )
+                )
+            results.extend(
+                {
+                    "id": entry.id,
+                    "kind": "device",
+                    "event": entry.event,
+                    "entity": "device",
+                    "entity_id": entry.device_id,
+                    "actor": "—",
+                    "details": {"device_name": entry.device.device_name},
+                    "timestamp": entry.timestamp.isoformat(),
+                }
+                for entry in device_query.order_by(Log.timestamp.desc()).limit(200)
+            )
+
+        results.sort(key=lambda entry: entry["timestamp"], reverse=True)
+        return jsonify(results[:200])
 
     return app
 

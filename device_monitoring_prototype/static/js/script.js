@@ -273,11 +273,14 @@ function renderDeviceDetails(device) {
             <span class="device-information-label">${escapeHTML(label)}</span>
             <span class="device-information-value">${escapeHTML(value(item))}</span>
         </div>`;
-    const section = (title, items) => `
-        <section class="device-information-section">
-            <h6 class="device-information-heading">${escapeHTML(title)}</h6>
-            <div class="device-information-grid">${items.map(([label, item]) => card(label, item)).join('')}</div>
-        </section>`;
+    const section = (title, items) => {
+        const visibleItems = items.length ? items : [['Information', 'No records available']];
+        return `
+            <section class="device-information-section">
+                <h6 class="device-information-heading">${escapeHTML(title)}</h6>
+                <div class="device-information-grid">${visibleItems.map(([label, item]) => card(label, item)).join('')}</div>
+            </section>`;
+    };
     const owner = device.owner || {};
     const registrant = device.registered_by || {};
     const specification = device.specification || {};
@@ -286,18 +289,22 @@ function renderDeviceDetails(device) {
             ['Device ID', device.id], ['Asset Tag', device.asset_tag],
             ['Device Name', device.device_name], ['Hostname', device.hostname],
             ['Type', device.device_type], ['Status', device.status],
+            ['Owner User ID', device.owner_user_id],
+            ['Registered By User ID', device.registered_by_user_id],
             ['Serial Number', device.serial_number], ['Manufacturer', device.manufacturer],
             ['Model', device.model], ['Operating System', device.operating_system],
             ['OS Version', device.operating_system_version],
+            ['Registered At', device.registered_at], ['Updated At', device.updated_at],
+            ['Last Seen At', device.last_seen_at],
         ]),
         section('Ownership and Dates', [
             ['Owner', owner.full_name], ['Owner Username', owner.username],
             ['Owner Email', owner.email], ['Registered By', registrant.full_name],
             ['Registered By Username', registrant.username],
-            ['Registered At', device.registered_at], ['Updated At', device.updated_at],
-            ['Last Seen At', device.last_seen_at],
+            ['Registered By Email', registrant.email],
         ]),
         section('Hardware Specification', [
+            ['Device ID', specification.device_id],
             ['CPU', specification.cpu_model], ['CPU Cores', specification.cpu_cores],
             ['CPU Threads', specification.cpu_threads], ['Memory (bytes)', specification.memory_bytes],
             ['Storage (bytes)', specification.storage_bytes], ['GPU', specification.gpu_model],
@@ -307,15 +314,19 @@ function renderDeviceDetails(device) {
             ['Collected At', specification.collected_at],
         ]),
         section('Network Records', (device.network_records || []).flatMap(record => [
+            ['Record ID', record.id], ['Device ID', record.device_id],
             ['IP Address', record.ip_address], ['Subnet Mask', record.subnet_mask],
             ['Default Gateway', record.default_gateway], ['DNS Server', record.dns_server],
             ['Connectivity', record.connectivity_status], ['Recorded At', record.recorded_at],
         ])),
         section('Network Interfaces', (device.network_interfaces || []).flatMap(networkInterface => [
+            ['Interface ID', networkInterface.id], ['Device ID', networkInterface.device_id],
             ['Interface', networkInterface.interface_name], ['MAC Address', networkInterface.mac_address],
             ['Interface Type', networkInterface.interface_type],
             ['Primary', networkInterface.is_primary ? 'Yes' : 'No'],
+            ['Created At', networkInterface.created_at],
             ...networkInterface.observations.flatMap(observation => [
+                ['Observation ID', observation.id], ['Interface ID', observation.interface_id],
                 ['Observed IP Address', observation.ip_address],
                 ['Subnet Prefix', observation.subnet_prefix], ['Gateway', observation.gateway],
                 ['DNS Servers', JSON.stringify(observation.dns_servers)],
@@ -324,16 +335,21 @@ function renderDeviceDetails(device) {
             ]),
         ])),
         section('Diagnostic History', (device.diagnostics || []).flatMap(run => [
+            ['Run ID', run.id], ['Device ID', run.device_id],
+            ['Initiated By ID', run.initiated_by_user_id],
+            ['Initiated By', run.initiated_by?.full_name || run.initiated_by?.username],
             ['Diagnostic Status', run.status], ['Summary', run.summary],
             ['Detected Problem', run.detected_problem], ['Recommendation', run.recommendation],
             ['Started At', run.started_at], ['Finished At', run.finished_at],
             ...run.checks.flatMap(check => [
+                ['Check ID', check.id], ['Run ID', check.run_id],
                 ['Check', check.check_name], ['Category', check.category],
                 ['Check Status', check.status], ['Result', check.result_summary],
                 ['Details', JSON.stringify(check.details)], ['Measured At', check.measured_at],
             ]),
         ])),
         section('Monitoring Metrics', (device.metrics || []).flatMap(metric => [
+            ['Metric ID', metric.id], ['Device ID', metric.device_id],
             ['CPU Usage (%)', metric.cpu_percent], ['Memory Usage (%)', metric.memory_percent],
             ['Storage Usage (%)', metric.storage_percent],
             ['Memory Used (bytes)', metric.memory_used_bytes],
@@ -343,23 +359,17 @@ function renderDeviceDetails(device) {
             ['Collected At', metric.collected_at],
         ])),
         section('System Logs', (device.logs || []).flatMap(log => [
+            ['Log ID', log.id], ['Device ID', log.device_id],
             ['Event', log.event], ['Timestamp', log.timestamp],
         ])),
+        section('Activity History', (device.activity_logs || []).flatMap(entry => [
+            ['Activity ID', entry.id], ['Actor User ID', entry.actor_user_id],
+            ['Event', entry.event], ['Entity', entry.entity_type],
+            ['Actor', entry.actor], ['Details', JSON.stringify(entry.details)],
+            ['Occurred At', entry.occurred_at],
+        ])),
     ];
-    return sections.map((content, index) => {
-        const hasData = [
-            device.network_records, device.network_interfaces, device.diagnostics,
-            device.metrics, device.logs,
-        ][index - 3];
-        if (index >= 3 && (!hasData || !hasData.length)) {
-            const headings = [
-                'Network Records', 'Network Interfaces', 'Diagnostic History',
-                'Monitoring Metrics', 'System Logs',
-            ];
-            return section(headings[index - 3], [['Information', 'No records available']]);
-        }
-        return content;
-    }).join('');
+    return sections.join('');
 }
 
 async function saveDevice() {
@@ -460,6 +470,7 @@ function renderUsersTable() {
 
 function initAdminPage() {
     refreshUsers().catch(error => showToast(error.message, 'danger'));
+    refreshAdminLogs().catch(error => showToast(error.message, 'danger'));
     document.getElementById('userSearchInput')?.addEventListener('input', event => {
         userSearch = event.target.value.trim().toLowerCase();
         userPage = 1;
@@ -470,6 +481,38 @@ function initAdminPage() {
         renderUsersTable();
     });
     document.getElementById('confirmDeleteUserBtn')?.addEventListener('click', deactivateSelectedUser);
+    document.getElementById('searchLogsBtn')?.addEventListener('click', () => {
+        refreshAdminLogs().catch(error => showToast(error.message, 'danger'));
+    });
+    document.getElementById('logKindFilter')?.addEventListener('change', () => {
+        refreshAdminLogs().catch(error => showToast(error.message, 'danger'));
+    });
+    document.getElementById('logSearchInput')?.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            refreshAdminLogs().catch(error => showToast(error.message, 'danger'));
+        }
+    });
+}
+
+async function refreshAdminLogs() {
+    const body = document.getElementById('adminLogsTableBody');
+    if (!body) return;
+    body.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Loading logs...</td></tr>';
+    const kind = document.getElementById('logKindFilter').value;
+    const query = document.getElementById('logSearchInput').value.trim();
+    const params = new URLSearchParams({ kind, q: query });
+    const logs = await api(`/api/admin/logs?${params}`);
+    body.innerHTML = logs.length ? logs.map(entry => `
+        <tr>
+            <td>${escapeHTML(entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '')}</td>
+            <td>${escapeHTML(entry.kind === 'activity' ? 'Account activity' : 'Device/system')}</td>
+            <td class="fw-semibold">${escapeHTML(entry.event)}</td>
+            <td>${escapeHTML(entry.entity || '')}${entry.entity_id ? ` #${escapeHTML(entry.entity_id)}` : ''}</td>
+            <td>${escapeHTML(entry.actor)}</td>
+            <td>${escapeHTML(entry.details ? JSON.stringify(entry.details) : '')}</td>
+        </tr>`).join('') :
+        '<tr><td colspan="6" class="text-center text-muted py-4">No matching logs found.</td></tr>';
 }
 
 function openUserModal(mode, userId) {
