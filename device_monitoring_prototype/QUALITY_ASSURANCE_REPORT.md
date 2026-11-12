@@ -11,10 +11,10 @@ This review covers the implemented application and the production roadmap in `FE
 | Feature area | Current behavior | Verification and limitations |
 |---|---|---|
 | Startup and authentication pages | Flask serves sign-in and registration; package-based commands initialize the app. | Login and registration pages render in integration tests. |
-| Accounts and passwords | Registration creates standard-user accounts; Werkzeug hashes passwords; `init-db` creates the initial `admin` account if absent; login records success/failure. | Tests verify registration, hashes, bootstrap-admin idempotency/login, and role restrictions. The bootstrap password must be changed before deployment; reset and MFA are not implemented. |
+| Accounts and passwords | Registration creates standard-user accounts; the reserved `admin` bootstrap account is initialized as active Administrator with a Werkzeug hash of `admin123`; login records success/failure. | Tests verify reserved-name rejection, account recovery on repeated initialization, bootstrap login, and role restrictions. Change the development bootstrap password before deployment; reset and MFA are not implemented. |
 | Sessions and request security | Flask-Login sessions, CSRF validation for writes, HttpOnly/SameSite cookies, configurable Secure cookies, and server-side authorization. | Tests exercise authenticated routes, owner scoping, admin-only APIs, and access-denied responses. Rate limiting and production HTTPS are not implemented. |
 | Roles and administration | `init-db` seeds Administrator/User roles and permissions; admins can create, edit, and deactivate users and search/filter activity and device logs; the last active admin cannot be removed or demoted. | Tests cover admin login, user CRUD, log filters, user denial, and role protections. |
-| Device inventory | Signed-in users register, edit, view, and archive their own devices; admins can manage all devices; archived records retain history. The eye action loads selected-device details in a read-only view. | Tests verify owner linkage, stored specifications/network/diagnostics/logs, detail access, and cross-owner denial. |
+| Device inventory | Signed-in owners/registrants can register, edit, view, archive, and restore their devices. Administrators can manage all devices and soft-delete while retaining records. Standard-user detail APIs return only approved fields; the eye action loads selected-device details in read-only mode. | Tests verify active/archive/restore/deleted transitions, retention, role-specific detail responses, archive access, and cross-owner denial. |
 | Dashboard and device UI | Dashboard reads authorized fleet records; device page provides search, sort, pagination, device actions, and toast feedback. | Routes and APIs are tested; the browser interactions and responsive layout have not had automated browser or device-matrix testing. |
 | Host inventory | Registration stores best-effort hardware and network information from the machine running Flask. | Tests use deterministic collector values. This is not remote endpoint collection; GPU and motherboard values are currently unavailable. |
 | Diagnostics and history | A scan appends a diagnostic run/check; device detail/history APIs return diagnostic, network, activity, and device-log records. | Persistence is tested. The scan is explicitly a placeholder and does not execute hardware checks. |
@@ -39,9 +39,9 @@ The SQLAlchemy models and `schema.sql` define 15 tables:
 | `device_metrics` | Historical CPU, memory, storage, and network metrics; collection is not enabled. |
 | `activity_logs` | Broader timestamped account/system actions with an optional actor and entity reference. |
 
-Relationships, unique constraints, status checks, and lookup indexes are represented in the models/schema. Devices belong to a user; a device has one specification and can have many network snapshots, interfaces, device logs, diagnostic runs, and metrics; each run can have multiple checks. User/role and role/permission links use association tables. Account deactivation and device retirement preserve historical records.
+Relationships, unique constraints, status checks, and lookup indexes are represented in the models/schema. Devices belong to a user; a device has one specification and can have many network snapshots, interfaces, device logs, diagnostic runs, and metrics; each run can have multiple checks. Device connectivity (`online`, `offline`, etc.) is separate from lifecycle (`active`, `archived`, `deleted`). Account deactivation and all device lifecycle actions preserve database records.
 
-**Database verification boundary:** the integration suite uses SQLite and does not prove MySQL connectivity, MySQL DDL/migration compatibility, permissions, or persistence after a MySQL restart. A new database can be initialized with `flask --app device_monitoring_prototype.app init-db`; an earlier project schema must be backed up and upgraded using `migrations\001_database_integration.sql` first. See `README.md` and `DATABASE_DESIGN.md`.
+**Database verification boundary:** the integration suite uses SQLite and does not prove MySQL connectivity, MySQL DDL/migration compatibility, permissions, or persistence after a MySQL restart. A new database can be initialized with `flask --app device_monitoring_prototype.app init-db`; existing databases must be backed up and upgraded with their applicable migration, including `migrations\004_device_lifecycle.sql` for the new device-state columns. See `README.md` and `DATABASE_DESIGN.md`.
 
 ## Database setup
 
@@ -55,12 +55,12 @@ Run from the repository root:
 .\.venv\Scripts\python.exe -m unittest discover -s device_monitoring_prototype\tests -v
 ```
 
-The integration suite covers page rendering, environment-file selection, registration/login and password hashes, default-administrator idempotency/login, database/seed-data error responses, device-detail serialization and ownership boundaries, admin device/user CRUD, administrator log searching/filtering, role protections, and sample data. Test databases are isolated SQLite instances; browser automation and a cross-browser responsive review were not run.
+The 15 integration tests cover page rendering, environment-file selection, registration/login and password hashes, default-administrator recovery/login, database/seed-data error responses, role-limited device details, archive/restore/soft-delete retention, admin device/user CRUD, log searching/filtering, owner/registrant boundaries, and sample data. Test databases are isolated SQLite instances; browser automation and cross-browser responsive testing were not run.
 
 ## Release risks and acceptance follow-up
 
 - Configure a private `.env` with valid XAMPP credentials, then verify `init-db`, account creation, and persistence on the local MySQL/MariaDB instance.
-- Apply and verify the legacy migration only where an earlier schema exists; back up first.
+- Back up and apply the applicable migration (`001`, `003`, then `004` as appropriate) before initializing an existing schema.
 - Add browser/accessibility and responsive-device checks before relying on the UI for deployment.
 - Real endpoint monitoring, live metrics, diagnostics, alerts, exports, MFA/recovery, rate limiting, production HTTPS/server setup, and backup/restore remain future work.
 - Before deployment, set a persistent random `SECRET_KEY`, enable Secure cookies over HTTPS, and configure database backups and production serving as described in the project documentation.

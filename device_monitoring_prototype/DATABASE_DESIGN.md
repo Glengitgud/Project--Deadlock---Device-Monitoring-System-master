@@ -8,7 +8,7 @@
 - Each `diagnostic_run` can have multiple detailed `diagnostic_checks`.
 - `users` ↔ `roles` use `user_roles`; `roles` ↔ `permissions` use `role_permissions`.
 - `activity_logs` retain the acting user when available and record account/device/diagnostic events.
-- Account removal is a status change and device removal archives the device, preserving the owner and all device history.
+- Account removal is a status change. Device lifecycle (`active`, `archived`, `deleted`) is separate from connectivity status; archive/restore and administrator soft delete preserve the device row and all history.
 
 ## Tables
 
@@ -17,7 +17,7 @@
 | `users` | Full name, unique username/email, Werkzeug password hash, status, timestamps |
 | `roles`, `permissions` | RBAC roles and permission codes |
 | `user_roles`, `role_permissions` | RBAC many-to-many associations |
-| `devices` | Device name, hostname, type, OS, status, owner and registration times |
+| `devices` | Device identity, owner/registrant, connectivity status, active/archive/delete lifecycle, and lifecycle timestamps |
 | `logs` | Device-linked event text and timestamp for registration, edits, archives, and diagnostic history |
 | `device_specifications` | CPU, core/thread count, RAM/storage capacity, optional GPU/motherboard, OS version |
 | `network_records` | Timestamped IP, subnet mask, gateway, DNS server, connectivity status |
@@ -27,17 +27,19 @@
 | `device_metrics` | Historical CPU, memory, storage, and network metrics (not currently collected) |
 | `activity_logs` | Auditable account and system actions for administrator oversight |
 
-`schema.sql` creates the full MySQL/MariaDB schema from scratch. Existing databases created from the earlier project design must first be backed up and upgraded with `migrations/001_database_integration.sql`. The original XAMPP prototype schema has a separate upgrade, `migrations/003_upgrade_xampp_prototype.sql`; back up first and use it only when the legacy `users`, `devices`, and `logs` tables are empty. Then run `flask --app device_monitoring_prototype.app init-db` to create missing tables and seed the `Administrator` and `User` roles with their permissions. `db.create_all()` does not alter existing tables.
+`schema.sql` creates the full MySQL/MariaDB schema from scratch. Existing databases created from the earlier project design must first be backed up and upgraded with `migrations/001_database_integration.sql`. The original XAMPP prototype schema has a separate upgrade, `migrations/003_upgrade_xampp_prototype.sql`; back up first and use it only when the legacy `users`, `devices`, and `logs` tables are empty. Apply `migrations/004_device_lifecycle.sql` to an existing current schema before starting the updated application. Then run `flask --app device_monitoring_prototype.app init-db` to create missing tables and seed roles and permissions. `db.create_all()` does not alter existing tables.
 
 ## Authentication and authorization
 
-Public registration always creates a `User` role; it cannot grant administrator access. Passwords are hashed using `werkzeug.security.generate_password_hash` and checked using `check_password_hash`. Flask-Login manages sessions. Admin-only account management is checked server-side, device data is owner-scoped, write operations require the session CSRF token, and disabled users are rejected on subsequent requests.
+Public registration always creates a `User` role and rejects the reserved `admin` username. `init-db` restores the reserved account as an active Administrator with the hashed `admin123` bootstrap password; it is excluded from user management. Passwords are hashed using `werkzeug.security.generate_password_hash` and checked using `check_password_hash`. Flask-Login manages sessions. Admin-only account management is checked server-side, device data is limited to owners/registrants, write operations require the session CSRF token, and disabled users are rejected on subsequent requests (except the reserved Administrator).
 
-Create the initial administrator interactively (password input is hidden):
+Create the initial Administrator and RBAC tables:
 
 ```powershell
-flask --app device_monitoring_prototype.app create-admin
+flask --app device_monitoring_prototype.app init-db
 ```
+
+The bootstrap login is `admin` / `admin123`. Change it before deployment. `create-admin` can add additional administrator accounts.
 
 Database credentials are read from `.env`/environment variables or `DATABASE_URL`. Set a persistent random `SECRET_KEY`; set `COOKIE_SECURE=true` when HTTPS is enabled.
 
@@ -50,7 +52,11 @@ Database credentials are read from `.env`/environment variables or `DATABASE_URL
 | `POST /register` | Public | Create a standard account |
 | `POST /login`, `POST /logout` | Public / signed-in | Verify password hash; start/end a Flask-Login session |
 | `GET/POST /api/devices` | Signed-in | List visible devices / register an owned device |
-| `PATCH/DELETE /api/devices/<id>` | Owner or admin | Update or archive; history is retained |
+| `PATCH /api/devices/<id>` | Owner/registrant or admin | Update an active device |
+| `POST /api/devices/<id>/archive` | Owner/registrant or admin | Archive without deleting the device row |
+| `GET /api/archived-devices` | Owner/registrant or admin | List archived devices |
+| `POST /api/devices/<id>/restore` | Owner/registrant or admin | Restore an archived device |
+| `DELETE /api/devices/<id>` | Admin | Mark the device deleted; retain the device row and history |
 | `POST /api/devices/<id>/diagnostics` | Owner or admin | Append a diagnostic history record |
 | `GET /api/devices/<id>/history` | Owner or admin | Read diagnostic and network history |
 | `GET/POST /api/users` | Admin | List or create accounts |
