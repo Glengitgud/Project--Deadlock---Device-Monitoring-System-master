@@ -31,4 +31,4 @@ Open **http://127.0.0.1:5000**. Do not run `device_monitoring_prototype\app.py` 
 - API writes use CSRF validation; administrator and device-owner access checks run on the server.
 - Collection currently describes the machine running Flask. Remote device monitoring and real diagnostic execution require an authenticated endpoint agent and are not implemented.
 
-See [`device_monitoring_prototype/README.md`](device_monitoring_prototype/README.md) for additional setup notes, [`device_monitoring_prototype/DATABASE_DESIGN.md`](device_monitoring_prototype/DATABASE_DESIGN.md) for schema details, and [`device_monitoring_prototype/QUALITY_ASSURANCE_REPORT.md`](device_monitoring_prototype/QUALITY_ASSURANCE_REPORT.md) for the QA scope and verification status.
+See [`device_monitoring_prototype/README.md`](device_monitoring_prototype/README.md) for additional setup notes, [`DATABASE_DESIGN.md`](DATABASE_DESIGN.md) for schema details, and [`device_monitoring_prototype/QUALITY_ASSURANCE_REPORT.md`](device_monitoring_prototype/QUALITY_ASSURANCE_REPORT.md) for the QA scope and verification status.
