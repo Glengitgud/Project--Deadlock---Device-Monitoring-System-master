@@ -1,60 +1,67 @@
 # Quality Assurance Report
 
-**System:** Centralized End-User Device Monitoring and Diagnostic System (DevMonitor)  
-**Review date:** 2026-11-11  
-**Status:** Login, registration, dashboard, device, and admin flows are covered by application-level tests. The app now reports database setup failures as 503 responses. Live MySQL access and schema operations are not verified.
+**System:** Centralized End-User Device Monitoring and Diagnostic System (DevMonitor)
+**Review date:** 2026-11-12
+**Result:** Application-level tests pass against isolated SQLite databases. Live MySQL operation is blocked by local configuration; the database service is running, but no `device_monitoring_prototype\.env` file is present.
 
-## Current incident
+## Scope and feature status
 
-The login and registration GET pages render successfully. The form submissions query or write MySQL and failed because the local app was using its default `root` account without a password (`OperationalError 1045: Access denied`). The app previously surfaced that database failure as an Internal Server Error. It now loads the prototype-local `.env` when launched from the repository root and returns a setup-oriented 503 response for database errors or missing RBAC seed data. Valid MySQL credentials, schema, and seeded roles are still required for successful sign-in/registration.
+This review covers the implemented application and the production roadmap in `FEATURES_AND_FUTURE_WORK.md`. Roadmap items are not treated as delivered features.
 
-## Scope
-
-This report covers the Flask application, account and session flows, authorization, device management, inventory capture, diagnostic and network history, database schema, browser-facing pages, and the known production gaps listed in `FEATURES_AND_FUTURE_WORK.md`.
-
-## Feature and database coverage
-
-| Area | Implemented behavior | QA coverage / limitation |
+| Feature area | Current behavior | Verification and limitations |
 |---|---|---|
-| Application startup and pages | Package-based Flask app, login and registration pages, dashboard, devices, and admin pages | Tests cover login/register rendering, standard-user dashboard/device/API routes, admin view, and static CSS. Startup requires the documented package-based command. |
-| Accounts and passwords | Registration persists users; Werkzeug hashes passwords; login verifies hashes | Tests verify registration, incorrect/correct password behavior, hash persistence, and clear handling when DB/schema/roles are unavailable. |
-| Session and access control | Flask-Login sessions, CSRF checks, owner-scoped device operations, admin-only user management | Tests verify a standard user is denied the admin page and an administrator can manage users. |
-| Device inventory | Owner-linked device records; validated create/update/archive; dashboard and device list read from the database | Device registration, ownership, persisted specification and network records, and history are exercised with SQLite. |
-| Hardware and network snapshots | Best-effort system information saved on device registration | Test values are supplied in the integration test. Production collection currently sees the Flask host, not a remote endpoint. |
-| Diagnostics and audit | Each scan request appends a diagnostic run/check; database writes record activity | Tests verify diagnostic and network history persistence. A scan is explicitly a placeholder; no hardware diagnostic runs. |
-| MySQL schema | SQLAlchemy models and `schema.sql` define RBAC, accounts, devices, specifications, interfaces/observations, network records, diagnostics, metrics, and audit history | Models can be exercised using SQLite. The MySQL DDL must be applied and tested on the target MySQL server separately. |
-| User interface | Responsive dark-themed login, registration, dashboard, device, and admin templates | Server-rendered login and registration pages are integration-tested; a browser/device compatibility matrix has not been run. |
+| Startup and authentication pages | Flask serves sign-in and registration; package-based commands initialize the app. | Login and registration pages render in integration tests. |
+| Accounts and passwords | Registration creates standard-user accounts; Werkzeug hashes passwords; login checks the hash; accounts can be disabled. | Tests verify registration, hash storage, correct/incorrect passwords, and disabled/admin restrictions. Password reset and MFA are not implemented. |
+| Sessions and request security | Flask-Login sessions, CSRF validation for writes, HttpOnly/SameSite cookies, configurable Secure cookies, and server-side authorization. | Tests exercise authenticated routes and role restrictions. Rate limiting and production HTTPS are not implemented. |
+| Roles and administration | `init-db` seeds Administrator/User roles and permissions; admins can create, edit, and deactivate users; the last active admin cannot be removed or demoted. | Tests cover admin access, user creation, and role protections. |
+| Device inventory | Signed-in users register, edit, view, and archive their own devices; admins can manage all devices; archived records retain history. | Tests verify owner linkage and persisted specification/network data. |
+| Dashboard and device UI | Dashboard reads authorized fleet records; device page provides search, sort, pagination, device actions, and toast feedback. | Routes and APIs are tested; the browser interactions and responsive layout have not had automated browser or device-matrix testing. |
+| Host inventory | Registration stores best-effort hardware and network information from the machine running Flask. | Tests use deterministic collector values. This is not remote endpoint collection; GPU and motherboard values are currently unavailable. |
+| Diagnostics and history | A scan appends a diagnostic run/check and history APIs return diagnostic and network records. | Persistence is tested. The scan is explicitly a placeholder and does not execute hardware checks. |
+| UI/UX | Dark minimal theme, responsive sidebar, Bootstrap components, login/register, dashboard, device, and admin pages. | Templates and static assets are served by the app; visual accessibility/contrast and cross-browser behavior have not been independently measured. |
+| Roadmap features | Live telemetry/alerts, reporting, endpoint agents, recovery/MFA, real diagnostics, and production deployment are listed as future work. | Not implemented or claimed as passing; see `FEATURES_AND_FUTURE_WORK.md`. |
 
-### Database tables
+## Database scope
 
-The schema contains 14 tables: `users`, `roles`, `permissions`, `user_roles`, `role_permissions`, `devices`, `device_specifications`, `network_interfaces`, `network_observations`, `network_records`, `diagnostic_runs`, `diagnostic_checks`, `device_metrics`, and `activity_logs`.
+The SQLAlchemy models and `schema.sql` define 14 tables:
 
-Core relationships include users-to-roles and roles-to-permissions many-to-many links; users-to-owned/registered-devices; one device-to-one specification; one device-to-many network interfaces, network observations, network records, diagnostic runs, and metric samples; and one diagnostic run-to-many checks. Activity records optionally reference their actor.
+| Table(s) | Responsibility |
+|---|---|
+| `users` | Account identity, password hash, status, and timestamps. |
+| `roles`, `permissions` | RBAC role and permission definitions. |
+| `user_roles`, `role_permissions` | Many-to-many account-role and role-permission associations. |
+| `devices` | Device inventory, status, owner, registering user, and timestamps. |
+| `device_specifications` | One-to-one CPU, memory, storage, GPU, BIOS, motherboard, and OS snapshot. |
+| `network_interfaces`, `network_observations` | Interface inventory and timestamped address/connection observations. |
+| `network_records` | Timestamped device IP, subnet, gateway, DNS, and connectivity snapshots. |
+| `diagnostic_runs`, `diagnostic_checks` | Diagnostic history and per-run check results. |
+| `device_metrics` | Historical CPU, memory, storage, and network metrics; collection is not enabled. |
+| `activity_logs` | Timestamped actions with an optional actor and entity reference. |
 
-## Verification
+Relationships, unique constraints, status checks, and lookup indexes are represented in the models/schema. Devices belong to a user; a device has one specification and can have many network snapshots, interfaces, diagnostic runs, and metrics; each run can have multiple checks. User/role and role/permission links use association tables. Account deactivation and device retirement preserve historical records.
 
-The application test suite uses isolated SQLite databases and verifies:
+**Database verification boundary:** the integration suite uses SQLite and does not prove MySQL connectivity, MySQL DDL/migration compatibility, permissions, or persistence after a MySQL restart. A new database can be initialized with `flask --app device_monitoring_prototype.app init-db`; an earlier project schema must be backed up and upgraded using `migrations\001_database_integration.sql` first. See `README.md` and `DATABASE_DESIGN.md`.
 
-- login and registration templates render, along with authenticated standard-user/admin pages and standard APIs;
-- registration stores a password hash and rejects an incorrect password;
-- unavailable database/schema or missing role seed data returns a setup-oriented 503 instead of an unhandled 500;
-- authenticated users can register devices and retain linked specification/network data;
-- diagnostic and network history persists;
-- standard users cannot access administrator views; and
-- administrator user creation and role protections work.
+## Current database incident
 
-Additional verification includes Python syntax compilation, JavaScript syntax checking, Flask route discovery, and compilation of SQLAlchemy table definitions with the MySQL dialect. A live connection attempt was rejected because MySQL's default `root` account has no configured password; no project `.env` file is present. The app now explicitly loads `device_monitoring_prototype\.env` when launched from the repository root. These checks do not replace running the migration or schema against the actual MySQL version and configured application credentials.
+The local `MySQL80` service is running, but `device_monitoring_prototype\.env` is absent. The app therefore falls back to `root` with an empty password and targets `devmonitor` on `127.0.0.1`; a direct `SELECT 1` fails with MySQL error **1045 (access denied)**. This is a local credential/configuration issue, not a failing application test. Valid credentials and an initialized database cannot be supplied or verified from this checkout.
 
-Run the integration suite from the repository root:
+The unavailable page now gives the setup steps: copy `.env.example` to `.env`, set the actual MySQL user/password and persistent secret, confirm the database exists, run `init-db`, then restart the app. Keep `.env` private. For existing legacy data, back up and apply the documented migration before initialization.
+
+## Test results
+
+Run from the repository root:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s device_monitoring_prototype\tests -v
 ```
 
-## Known gaps and release risks
+The eight integration tests pass. They cover page rendering, environment-file selection, registration/login and password hashes, database/seed-data error responses, standard-user pages/APIs, device ownership and persisted snapshots/history, standard-user admin denial, and administrator account/role protections. Test databases are isolated SQLite instances; no live MySQL or browser automation was run.
 
-- Live connectivity to MySQL, schema creation/migration, and persistence across a MySQL restart remain unverified until valid credentials are configured in `device_monitoring_prototype\.env`.
-- An endpoint agent is needed for remote hardware/network inventory and live telemetry. The current collector sees the Flask host.
-- Diagnostic records are placeholders; no real checks are executed.
-- MFA, password recovery, rate limiting, production HTTPS/deployment, live alerts, and reporting remain future work as described in `FEATURES_AND_FUTURE_WORK.md`.
-- Before deployment, configure a persistent secret key, secure cookies behind HTTPS, least-privilege database credentials, backups, and the production server configuration.
+## Release risks and acceptance follow-up
+
+- Configure a private `.env` with valid least-privilege MySQL credentials, then verify `init-db`, account creation, and persistence on the target MySQL 8 instance.
+- Apply and verify the legacy migration only where an earlier schema exists; back up first.
+- Add browser/accessibility and responsive-device checks before relying on the UI for deployment.
+- Real endpoint monitoring, live metrics, diagnostics, alerts, exports, MFA/recovery, rate limiting, production HTTPS/server setup, and backup/restore remain future work.
+- Before deployment, set a persistent random `SECRET_KEY`, enable Secure cookies over HTTPS, and configure database backups and production serving as described in the project documentation.
