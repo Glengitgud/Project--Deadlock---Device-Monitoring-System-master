@@ -637,6 +637,33 @@ def create_app(test_config=None):
             permission_rows["diagnostics.write"],
         ]
         db.session.commit()
+
+        default_admin = User.query.filter(func.lower(User.username) == "admin").one_or_none()
+        if default_admin is None:
+            if User.query.filter(func.lower(User.email) == "admin@localhost").first():
+                raise click.ClickException(
+                    "Cannot create the default admin account because admin@localhost is already in use."
+                )
+            default_admin = User(
+                username="admin",
+                email="admin@localhost",
+                full_name="Administrator",
+                password_hash=generate_password_hash(
+                    os.environ.get("ADMIN_INITIAL_PASSWORD", "admin123")
+                ),
+                status="active",
+            )
+            default_admin.roles.append(roles["Administrator"])
+            db.session.add(default_admin)
+            db.session.commit()
+            click.echo("Created the default Administrator account.")
+        elif not default_admin.is_admin:
+            raise click.ClickException(
+                "The username 'admin' already belongs to a non-administrator account. "
+                "Resolve that account before initializing the default Administrator."
+            )
+        else:
+            click.echo("The Administrator account already exists; it was not changed.")
         click.echo("Database tables and default RBAC roles are ready.")
 
     @app.cli.command("seed-sample-data")

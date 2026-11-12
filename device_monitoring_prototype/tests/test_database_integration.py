@@ -123,6 +123,31 @@ class DatabaseIntegrationTest(unittest.TestCase):
             self.assertIn("logs", inspect(db.engine).get_table_names())
             self.assertEqual(Role.query.count(), 2)
 
+    def test_init_db_creates_default_admin_once_and_admin_can_log_in(self):
+        runner = self.app.test_cli_runner()
+        first_result = runner.invoke(args=["init-db"])
+        self.assertEqual(first_result.exit_code, 0, first_result.output)
+        second_result = runner.invoke(args=["init-db"])
+        self.assertEqual(second_result.exit_code, 0, second_result.output)
+        self.assertIn("already exists", second_result.output)
+
+        with self.app.app_context():
+            administrator = User.query.filter_by(username="admin").one()
+            self.assertTrue(administrator.is_admin)
+            self.assertTrue(administrator.is_active)
+            self.assertTrue(check_password_hash(administrator.password_hash, "admin123"))
+            self.assertEqual(User.query.filter_by(username="admin").count(), 1)
+
+        self.client.get("/login")
+        with self.client.session_transaction() as session:
+            token = session["_csrf_token"]
+        response = self.client.post(
+            "/login",
+            data={"csrf_token": token, "username": "admin", "password": "admin123"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.client.get("/admin").status_code, 200)
+
     def test_all_standard_user_pages_and_apis_render(self):
         self.register_and_login()
         for path in ("/dashboard", "/devices", "/api/dashboard", "/api/devices"):
