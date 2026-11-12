@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from sqlalchemy import inspect
 from werkzeug.security import check_password_hash
 from werkzeug.security import generate_password_hash
 
@@ -10,6 +11,7 @@ from device_monitoring_prototype.app import app as default_app
 from device_monitoring_prototype.models import (
     Device,
     DiagnosticRun,
+    Log,
     NetworkRecord,
     Role,
     User,
@@ -101,6 +103,13 @@ class DatabaseIntegrationTest(unittest.TestCase):
         load_dotenv.assert_called_once_with(
             dotenv_path=Path(default_app.root_path, ".env")
         )
+
+    def test_init_db_command_includes_device_logs(self):
+        result = self.app.test_cli_runner().invoke(args=["init-db"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        with self.app.app_context():
+            self.assertIn("logs", inspect(db.engine).get_table_names())
+            self.assertEqual(Role.query.count(), 2)
 
     def test_all_standard_user_pages_and_apis_render(self):
         self.register_and_login()
@@ -204,6 +213,8 @@ class DatabaseIntegrationTest(unittest.TestCase):
             self.assertEqual(device.owner.username, "testuser")
             self.assertEqual(device.hardware_spec.cpu_model, "Test CPU")
             self.assertEqual(len(device.network_records), 1)
+            self.assertEqual(len(device.logs), 1)
+            self.assertEqual(device.logs[0].event, "Device registered")
 
         response = self.client.post(
             f"/api/devices/{device_id}/diagnostics",
@@ -213,9 +224,28 @@ class DatabaseIntegrationTest(unittest.TestCase):
         history = self.client.get(f"/api/devices/{device_id}/history")
         self.assertEqual(len(history.json["diagnostics"]), 1)
         self.assertEqual(len(history.json["network"]), 1)
+        self.assertEqual(len(history.json["logs"]), 2)
         with self.app.app_context():
             self.assertEqual(DiagnosticRun.query.count(), 1)
             self.assertEqual(NetworkRecord.query.count(), 1)
+            self.assertEqual(Log.query.count(), 2)
+
+    def test_sample_data_command_creates_linked_records(self):
+        result = self.app.test_cli_runner().invoke(
+            args=["seed-sample-data"],
+            input="sample-password-long\nsample-password-long\n",
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        with self.app.app_context():
+            user = User.query.filter_by(username="sample_user").one()
+            device = Device.query.filter_by(device_name="Sample Laptop").one()
+            self.assertEqual(device.owner.id, user.id)
+            self.assertEqual(len(device.network_records), 1)
+            self.assertEqual(len(device.logs), 1)
+            self.assertNotEqual(
+                user.password_hash,
+                "sample-password-long",
+            )
 
     def test_standard_user_cannot_open_admin_panel(self):
         self.register_and_login()

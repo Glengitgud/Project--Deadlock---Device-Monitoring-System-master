@@ -14,7 +14,7 @@ CREATE TABLE users (
     UNIQUE KEY uq_users_username (username),
     UNIQUE KEY uq_users_email (email),
     CONSTRAINT ck_users_status CHECK (status IN ('active', 'inactive', 'locked'))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE roles (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -23,7 +23,7 @@ CREATE TABLE roles (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uq_roles_name (name)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE permissions (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -31,7 +31,7 @@ CREATE TABLE permissions (
     description VARCHAR(255) NULL,
     PRIMARY KEY (id),
     UNIQUE KEY uq_permissions_code (code)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE devices (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -61,7 +61,18 @@ CREATE TABLE devices (
     CONSTRAINT ck_devices_status CHECK (
         status IN ('online', 'offline', 'maintenance', 'retired', 'unknown')
     )
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE logs (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    device_id BIGINT NOT NULL,
+    event VARCHAR(255) NOT NULL,
+    `timestamp` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY ix_logs_device_timestamp (device_id, `timestamp`),
+    CONSTRAINT fk_logs_device FOREIGN KEY (device_id)
+        REFERENCES devices (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE user_roles (
     user_id BIGINT NOT NULL,
@@ -72,7 +83,7 @@ CREATE TABLE user_roles (
         REFERENCES users (id) ON DELETE CASCADE,
     CONSTRAINT fk_user_roles_role FOREIGN KEY (role_id)
         REFERENCES roles (id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE role_permissions (
     role_id BIGINT NOT NULL,
@@ -83,7 +94,7 @@ CREATE TABLE role_permissions (
         REFERENCES roles (id) ON DELETE CASCADE,
     CONSTRAINT fk_role_permissions_permission FOREIGN KEY (permission_id)
         REFERENCES permissions (id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE device_specifications (
     device_id BIGINT NOT NULL,
@@ -100,7 +111,7 @@ CREATE TABLE device_specifications (
     PRIMARY KEY (device_id),
     CONSTRAINT fk_device_specifications_device FOREIGN KEY (device_id)
         REFERENCES devices (id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE network_interfaces (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -115,7 +126,7 @@ CREATE TABLE network_interfaces (
     KEY ix_network_interfaces_mac (mac_address),
     CONSTRAINT fk_network_interfaces_device FOREIGN KEY (device_id)
         REFERENCES devices (id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE network_observations (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -131,7 +142,7 @@ CREATE TABLE network_observations (
     KEY ix_network_observations_interface_time (interface_id, observed_at),
     CONSTRAINT fk_network_observations_interface FOREIGN KEY (interface_id)
         REFERENCES network_interfaces (id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE network_records (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -149,7 +160,7 @@ CREATE TABLE network_records (
     CONSTRAINT ck_network_records_connectivity CHECK (
         connectivity_status IN ('connected', 'disconnected', 'unknown')
     )
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE diagnostic_runs (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -170,7 +181,7 @@ CREATE TABLE diagnostic_runs (
     CONSTRAINT ck_diagnostic_runs_status CHECK (
         status IN ('running', 'completed', 'failed', 'cancelled')
     )
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE diagnostic_checks (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -188,7 +199,7 @@ CREATE TABLE diagnostic_checks (
     CONSTRAINT ck_diagnostic_checks_status CHECK (
         status IN ('passed', 'warning', 'failed', 'skipped')
     )
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE device_metrics (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -214,7 +225,7 @@ CREATE TABLE device_metrics (
     CONSTRAINT ck_device_metrics_storage_percent CHECK (
         storage_percent IS NULL OR (storage_percent >= 0 AND storage_percent <= 100)
     )
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE activity_logs (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -229,4 +240,4 @@ CREATE TABLE activity_logs (
     KEY ix_activity_logs_entity (entity_type, entity_id),
     CONSTRAINT fk_activity_logs_actor FOREIGN KEY (actor_user_id)
         REFERENCES users (id) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

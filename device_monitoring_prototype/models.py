@@ -190,6 +190,12 @@ class Device(db.Model):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    logs = db.relationship(
+        "Log",
+        back_populates="device",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
     diagnostic_runs = db.relationship(
         "DiagnosticRun",
         back_populates="device",
@@ -437,3 +443,25 @@ class ActivityLog(db.Model):
     )
 
     actor = db.relationship("User", back_populates="activity_logs")
+
+
+class Log(db.Model):
+    """A device-specific event shown in the device's history."""
+
+    __tablename__ = "logs"
+    __table_args__ = (
+        db.Index("ix_logs_device_timestamp", "device_id", "timestamp"),
+    )
+
+    id = db.Column(ID_TYPE, primary_key=True)
+    device_id = db.Column(
+        ID_TYPE,
+        db.ForeignKey("devices.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    event = db.Column(db.String(255), nullable=False)
+    timestamp = db.Column(
+        db.DateTime(timezone=True), nullable=False, server_default=func.current_timestamp()
+    )
+
+    device = db.relationship("Device", back_populates="logs")

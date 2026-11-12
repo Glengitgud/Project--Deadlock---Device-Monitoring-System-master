@@ -4,6 +4,7 @@
 
 - `users` own zero or more `devices`; each device created by the application has exactly one owner.
 - `devices` have one `device_specifications` row and many `network_records` and `diagnostic_runs`.
+- `devices` have many `logs`; deleting a device cascades to its device event history.
 - Each `diagnostic_run` can have multiple detailed `diagnostic_checks`.
 - `users` ↔ `roles` use `user_roles`; `roles` ↔ `permissions` use `role_permissions`.
 - `activity_logs` retain the acting user when available and record account/device/diagnostic events.
@@ -17,15 +18,16 @@
 | `roles`, `permissions` | RBAC roles and permission codes |
 | `user_roles`, `role_permissions` | RBAC many-to-many associations |
 | `devices` | Device name, hostname, type, OS, status, owner and registration times |
+| `logs` | Device-linked event text and timestamp for registration, edits, archives, and diagnostic history |
 | `device_specifications` | CPU, core/thread count, RAM/storage capacity, optional GPU/motherboard, OS version |
 | `network_records` | Timestamped IP, subnet mask, gateway, DNS server, connectivity status |
 | `network_interfaces`, `network_observations` | Optional lower-level interface/observation inventory retained from the initial design |
 | `diagnostic_runs` | Per-scan result, problem, recommendation, initiator, and timestamp |
 | `diagnostic_checks` | Individual result records for checks within a diagnostic run |
 | `device_metrics` | Historical CPU, memory, storage, and network metrics (not currently collected) |
-| `activity_logs` | Auditable user actions for administrator oversight |
+| `activity_logs` | Auditable account and system actions for administrator oversight |
 
-`schema.sql` creates the full MySQL 8 schema from scratch. Existing databases created from the earlier project design must first be backed up and upgraded with `migrations/001_database_integration.sql`. Run `flask --app python.app init-db` afterward to create missing tables and seed the `Administrator` and `User` roles with their permissions.
+`schema.sql` creates the full MySQL/MariaDB schema from scratch. Existing databases created from the earlier project design must first be backed up and upgraded with `migrations/001_database_integration.sql`. Run `flask --app device_monitoring_prototype.app init-db` afterward to create missing tables, including `logs`, and seed the `Administrator` and `User` roles with their permissions.
 
 ## Authentication and authorization
 
@@ -34,14 +36,14 @@ Public registration always creates a `User` role; it cannot grant administrator 
 Create the initial administrator interactively (password input is hidden):
 
 ```powershell
-flask --app python.app create-admin
+flask --app device_monitoring_prototype.app create-admin
 ```
 
 Database credentials are read from `.env`/environment variables or `DATABASE_URL`. Set a persistent random `SECRET_KEY`; set `COOKIE_SECURE=true` when HTTPS is enabled.
 
 ## Database CRUD and backend operations
 
-`python/services.py` implements validated account creation/update/deactivation, device creation/update/archive, and diagnostic history insertion. Flask views in `app.py` expose:
+`python/services.py` implements validated account creation/update/deactivation, device creation/update/archive, and diagnostic history insertion. Device events are retained in `logs`; broader account and system audit events remain in `activity_logs`. Flask views in `app.py` expose:
 
 | Method and path | Access | Operation |
 |---|---|---|

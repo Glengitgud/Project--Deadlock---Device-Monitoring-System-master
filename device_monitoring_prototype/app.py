@@ -3,6 +3,7 @@
 import os
 import re
 import secrets
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote_plus, urljoin, urlsplit
@@ -33,6 +34,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from device_monitoring_prototype.models import (
     Device,
+    Log,
+    NetworkRecord,
     Permission,
     Role,
     User,
@@ -50,7 +53,6 @@ from device_monitoring_prototype.services import (
     update_user,
 )
 
-
 login_manager = LoginManager()
 login_manager.login_view = "login"
 login_manager.login_message = "Please sign in to continue."
@@ -58,11 +60,13 @@ login_manager.login_message_category = "warning"
 
 
 def _database_uri():
+    """Build the MySQL connection string from environment settings."""
     if os.environ.get("DATABASE_URL"):
         return os.environ["DATABASE_URL"]
+    # XAMPP's local MySQL defaults are root, localhost, and port 3306.
     user = quote_plus(os.environ.get("MYSQL_USER", "root"))
     password = quote_plus(os.environ.get("MYSQL_PASSWORD", ""))
-    host = os.environ.get("MYSQL_HOST", "127.0.0.1")
+    host = os.environ.get("MYSQL_HOST", "localhost")
     port = os.environ.get("MYSQL_PORT", "3306")
     database = quote_plus(os.environ.get("MYSQL_DATABASE", "devmonitor"))
     return f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}?charset=utf8mb4"
@@ -93,6 +97,7 @@ def create_app(test_config=None):
     if not os.environ.get("SECRET_KEY") and not app.testing:
         app.logger.warning("SECRET_KEY is unset; configure a persistent random secret in production.")
 
+    # Connect the shared SQLAlchemy extension after the app has loaded its settings.
     db.init_app(app)
     login_manager.init_app(app)
 
@@ -370,6 +375,16 @@ def create_app(test_config=None):
                 }
                 for record in sorted(device.network_records, key=lambda item: item.recorded_at, reverse=True)
             ],
+            logs=[
+                {
+                    "id": entry.id,
+                    "event": entry.event,
+                    "timestamp": entry.timestamp.isoformat(),
+                }
+                for entry in sorted(
+                    device.logs, key=lambda item: item.timestamp, reverse=True
+                )
+            ],
         )
 
     @app.get("/api/users")
@@ -477,7 +492,65 @@ def create_app(test_config=None):
         ]
         db.session.commit()
         click.echo("Database tables and default RBAC roles are ready.")
-#
+
+    @app.cli.command("seed-sample-data")
+    @click.option("--username", default="sample_user", show_default=True)
+    def seed_sample_data_command(username):
+        """Create a test user, device, network record, and device log."""
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{3,64}", username):
+            raise click.ClickException(
+                "Username must be 3-64 letters, numbers, dots, dashes, or underscores."
+            )
+        if User.query.filter_by(username=username).first():
+            raise click.ClickException(f"User {username!r} already exists.")
+
+        role = Role.query.filter_by(name="User").one_or_none()
+        if role is None:
+            raise click.ClickException(
+                "Run `flask --app device_monitoring_prototype.app init-db` first."
+            )
+
+        password = click.prompt(
+            "Sample account password (minimum 12 characters)",
+            hide_input=True,
+            confirmation_prompt=True,
+        )
+        if len(password) < 12:
+            raise click.ClickException("Password must contain at least 12 characters.")
+
+        user = User(
+            username=username,
+            email=f"{username}@example.test",
+            full_name="Sample User",
+            password_hash=generate_password_hash(password),
+            status="active",
+        )
+        user.roles.append(role)
+        device = Device(
+            asset_tag=f"DM-{uuid.uuid4().hex[:16].upper()}",
+            device_name="Sample Laptop",
+            hostname="sample-laptop",
+            device_type="Laptop",
+            operating_system="Windows 11",
+            operating_system_version="Windows 11",
+            status="online",
+            owner=user,
+            registered_by=user,
+        )
+        device.network_records.append(
+            NetworkRecord(
+                ip_address="192.0.2.10",
+                subnet_mask="255.255.255.0",
+                connectivity_status="connected",
+            )
+        )
+        device.logs.append(Log(event="Sample device registered for testing"))
+        db.session.add(user)
+        db.session.commit()
+        click.echo(
+            f"Created sample user {username!r} and a linked device with a log entry."
+        )
+
     @app.cli.command("create-admin")
     @click.option("--username", prompt=True)
     @click.option("--email", prompt=True)
@@ -501,7 +574,7 @@ def create_app(test_config=None):
         role = Role.query.filter_by(name="Administrator").one_or_none()
         if role is None:
             raise click.ClickException(
-                "Run `flask --app python.app init-db` from device_monitoring_prototype."
+                "Run `flask --app device_monitoring_prototype.app init-db` from the repository root."
             )
         password = click.prompt("Password (minimum 12 characters)", hide_input=True, confirmation_prompt=True)
         if len(password) < 12:

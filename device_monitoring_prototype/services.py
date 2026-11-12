@@ -13,6 +13,7 @@ from device_monitoring_prototype.models import (
     DiagnosticCheck,
     DiagnosticRun,
     DeviceSpecification,
+    Log,
     NetworkRecord,
     Role,
     User,
@@ -55,7 +56,7 @@ def _role(name):
     if role is None:
         raise DatabaseSetupError(
             "Database roles are missing; run "
-            "`flask --app python.app init-db` from device_monitoring_prototype."
+            "`flask --app device_monitoring_prototype.app init-db` from the repository root."
         )
     return role
 
@@ -73,6 +74,10 @@ def _log(event_type, entity_type=None, entity_id=None, details=None):
             details=details,
         )
     )
+
+
+def _log_device_event(device, event):
+    db.session.add(Log(device=device, event=event))
 
 
 def create_user(data, *, role_name="User"):
@@ -193,6 +198,7 @@ def create_device(owner, data):
     device.network_records.append(NetworkRecord(**collect_network()))
     db.session.add(device)
     db.session.flush()
+    _log_device_event(device, "Device registered")
     _log("device.created", "device", device.id)
     db.session.commit()
     return device
@@ -217,6 +223,7 @@ def update_device(device, data):
         }:
             raise ValidationError("Invalid device status.")
         device.status = status.lower()
+    _log_device_event(device, "Device updated")
     _log("device.updated", "device", device.id)
     db.session.commit()
     return device
@@ -224,6 +231,7 @@ def update_device(device, data):
 
 def archive_device(device):
     device.status = "retired"
+    _log_device_event(device, "Device archived")
     _log("device.archived", "device", device.id)
     db.session.commit()
 
@@ -247,6 +255,7 @@ def record_diagnostic(device, user):
     )
     db.session.add(run)
     db.session.flush()
+    _log_device_event(device, "Diagnostic history recorded")
     _log("diagnostic.recorded", "diagnostic_run", run.id)
     db.session.commit()
     return run

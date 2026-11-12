@@ -2,7 +2,7 @@
 
 **System:** Centralized End-User Device Monitoring and Diagnostic System (DevMonitor)
 **Review date:** 2026-11-12
-**Result:** Application-level tests pass against isolated SQLite databases. Live MySQL operation is blocked by local configuration; the database service is running, but no `device_monitoring_prototype\.env` file is present.
+**Result:** Application-level tests use isolated SQLite databases. XAMPP/MySQL connectivity must be confirmed against the local XAMPP credentials before deployment.
 
 ## Scope and feature status
 
@@ -23,7 +23,7 @@ This review covers the implemented application and the production roadmap in `FE
 
 ## Database scope
 
-The SQLAlchemy models and `schema.sql` define 14 tables:
+The SQLAlchemy models and `schema.sql` define 15 tables:
 
 | Table(s) | Responsibility |
 |---|---|
@@ -31,22 +31,21 @@ The SQLAlchemy models and `schema.sql` define 14 tables:
 | `roles`, `permissions` | RBAC role and permission definitions. |
 | `user_roles`, `role_permissions` | Many-to-many account-role and role-permission associations. |
 | `devices` | Device inventory, status, owner, registering user, and timestamps. |
+| `logs` | Device-linked event text and timestamp for registration, edits, archives, and diagnostic history. |
 | `device_specifications` | One-to-one CPU, memory, storage, GPU, BIOS, motherboard, and OS snapshot. |
 | `network_interfaces`, `network_observations` | Interface inventory and timestamped address/connection observations. |
 | `network_records` | Timestamped device IP, subnet, gateway, DNS, and connectivity snapshots. |
 | `diagnostic_runs`, `diagnostic_checks` | Diagnostic history and per-run check results. |
 | `device_metrics` | Historical CPU, memory, storage, and network metrics; collection is not enabled. |
-| `activity_logs` | Timestamped actions with an optional actor and entity reference. |
+| `activity_logs` | Broader timestamped account/system actions with an optional actor and entity reference. |
 
-Relationships, unique constraints, status checks, and lookup indexes are represented in the models/schema. Devices belong to a user; a device has one specification and can have many network snapshots, interfaces, diagnostic runs, and metrics; each run can have multiple checks. User/role and role/permission links use association tables. Account deactivation and device retirement preserve historical records.
+Relationships, unique constraints, status checks, and lookup indexes are represented in the models/schema. Devices belong to a user; a device has one specification and can have many network snapshots, interfaces, device logs, diagnostic runs, and metrics; each run can have multiple checks. User/role and role/permission links use association tables. Account deactivation and device retirement preserve historical records.
 
 **Database verification boundary:** the integration suite uses SQLite and does not prove MySQL connectivity, MySQL DDL/migration compatibility, permissions, or persistence after a MySQL restart. A new database can be initialized with `flask --app device_monitoring_prototype.app init-db`; an earlier project schema must be backed up and upgraded using `migrations\001_database_integration.sql` first. See `README.md` and `DATABASE_DESIGN.md`.
 
-## Current database incident
+## Database setup
 
-The local `MySQL80` service is running, but `device_monitoring_prototype\.env` is absent. The app therefore falls back to `root` with an empty password and targets `devmonitor` on `127.0.0.1`; a direct `SELECT 1` fails with MySQL error **1045 (access denied)**. This is a local credential/configuration issue, not a failing application test. Valid credentials and an initialized database cannot be supplied or verified from this checkout.
-
-The unavailable page now gives the setup steps: copy `.env.example` to `.env`, set the actual MySQL user/password and persistent secret, confirm the database exists, run `init-db`, then restart the app. Keep `.env` private. For existing legacy data, back up and apply the documented migration before initialization.
+The app defaults to the local XAMPP database at `localhost:3306`, database `devmonitor`, using the common XAMPP `root`/empty-password configuration. Override the username/password in the ignored `.env` file when the local MySQL account differs. Create the database in phpMyAdmin, then run `init-db` to create the full schema and roles. Existing legacy databases should be backed up before applying their migration.
 
 ## Test results
 
@@ -56,11 +55,11 @@ Run from the repository root:
 .\.venv\Scripts\python.exe -m unittest discover -s device_monitoring_prototype\tests -v
 ```
 
-The eight integration tests pass. They cover page rendering, environment-file selection, registration/login and password hashes, database/seed-data error responses, standard-user pages/APIs, device ownership and persisted snapshots/history, standard-user admin denial, and administrator account/role protections. Test databases are isolated SQLite instances; no live MySQL or browser automation was run.
+The ten integration tests pass. They cover page rendering, environment-file selection, registration/login and password hashes, database/seed-data error responses, standard-user pages/APIs, device ownership and persisted snapshots/history, table creation and role seeding, linked device logs, sample data insertion, standard-user admin denial, and administrator account/role protections. Test databases are isolated SQLite instances; no live XAMPP/MySQL connection or browser automation was run.
 
 ## Release risks and acceptance follow-up
 
-- Configure a private `.env` with valid least-privilege MySQL credentials, then verify `init-db`, account creation, and persistence on the target MySQL 8 instance.
+- Configure a private `.env` with valid XAMPP credentials, then verify `init-db`, account creation, and persistence on the local MySQL/MariaDB instance.
 - Apply and verify the legacy migration only where an earlier schema exists; back up first.
 - Add browser/accessibility and responsive-device checks before relying on the UI for deployment.
 - Real endpoint monitoring, live metrics, diagnostics, alerts, exports, MFA/recovery, rate limiting, production HTTPS/server setup, and backup/restore remain future work.
